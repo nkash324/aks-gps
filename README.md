@@ -15,7 +15,7 @@ page if others need access):
 |---|---|
 | [AKS Kart Driver Briefing](https://claude.ai/artifact/43FYGY8i3wHb8Z3XZ95Xxo) | Short team briefing: the result, lap replay at three sensor levels, how the network and PPO work, open questions |
 | [AKS Kart Driver Overview](https://claude.ai/artifact/4ubgBm4Nxo1gXu8SWnNHVt) | Full technical write-up: track, kart model, sensors, EKF, planner, training, physics checks |
-| [Purdue Kart GPU Run 2 at 500M](https://claude.ai/artifact/CJkfqUACmtU8NtWsaADRRQ) | Benchmark of the final training run (G2 460.1M) against drivers A and B |
+| [Purdue Kart G2 vs Tuned B](https://claude.ai/artifact/QBwtwhiN93cniMGM8kF4Me) | Benchmark of the final model (G2 460.1M) against driver A and the best tuned driver B, on the same 1,000 laps per sensor level |
 
 ## Results
 
@@ -24,10 +24,10 @@ Mean lap on the same 1,000 simulated laps per driver, realistic sensor errors:
 | Driver | Mean lap | Laps finished |
 |---|---|---|
 | A: centreline pure pursuit, cautious | 51.23 s | 99.8% |
-| B: racing-line pure pursuit, best tuned settings | 46.47 s | 99.3% |
+| B: racing-line pure pursuit, best tuned settings (6.1 / 5.0 / 0.35) | 46.15 s | 99.0% |
 | **G2 460.1M: B + learned correction** | **43.46 s** | **99.3%** |
 
-G2 is about 3 s a lap faster than the best tuned B, on every lap both finished. The best
+G2 is about 2.7 s a lap faster than the best tuned B (median), on every lap both finished. The best
 checkpoint is `runs/gpu/20261029-234306-run2/ckpt/460062720/` (`model.zip` +
 `vecnormalize.pkl`, Stable-Baselines3 format).
 
