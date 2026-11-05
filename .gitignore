@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+gps.local.yaml
+# training output is big; the best checkpoint is added with git add -f
+runs/

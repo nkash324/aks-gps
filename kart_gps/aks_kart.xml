@@ -1,0 +1,107 @@
+<!--
+  aks_kart.xml -- our AKS kart for the GPS/map stack (no cameras).
+  Separate from the team's line_robot.xml, which the camera work keeps using.
+  kart_gps/kart.py loads it into a track world in place of line_robot.xml.
+
+  Numbers come from the AKS BoM (estimates where the BoM is silent):
+    - chassis: TopKart MSTEM3 E1 / Dreamer, 1.04 m wheelbase
+    - track (tyre centre to tyre centre): 1.00 m front, 1.15 m rear
+    - tyres: Hoosier R60B, front 10x4.50-5 (0.254 m dia, 0.115 m wide),
+      rear 11x7.10-5 (0.279 m dia, 0.18 m wide)
+    - mass 125 kg = the AKS rule minimum (275 lb). The BoM adds up to ~115 kg, so the
+      real kart needs ~10 kg ballast. 45/55 front/rear; centre of mass ~0.2 m up.
+    - steering: +-25 deg at the wheels (rate and delay are in kart.yaml)
+    - GNSS antenna (ZED-F9P): on a mast straight above the rear-axle centre, 0.75 m
+      off the ground. Above the rear axle = the point the drivers steer from, so
+      the GPS fix needs no lever-arm correction when the kart yaws; 0.75 m clears the
+      bodywork and keeps it ~0.6 m from the motor and VESC.
+    - IMU (BNO055): on the floor tray near the centre of mass.
+
+  The body origin sits on the rear axle centre, at rear-wheel radius above the
+  ground. Motor, regen and the hydraulic brake are torques on the rear axle, set
+  by kart.py every physics step (actuator "axle_torque"); the steering servos take
+  a wheel angle in radians.
+-->
+<mujoco model="aks_kart">
+  <asset>
+    <material name="ak_body" rgba="0.85 0.45 0.10 1"/>
+    <material name="ak_frame" rgba="0.75 0.75 0.78 1"/>
+    <material name="ak_dark" rgba="0.10 0.10 0.10 1"/>
+    <material name="ak_wheel" rgba="0.12 0.12 0.12 1"/>
+    <material name="ak_hub" rgba="0.55 0.55 0.58 1"/>
+  </asset>
+
+  <default>
+    <default class="ak_part">
+      <geom contype="0" conaffinity="0"/>
+    </default>
+    <default class="ak_tyre">
+      <geom type="cylinder" euler="90 0 0" material="ak_wheel" friction="1.0 0.005 0.0001"
+            condim="6" solref="0.004 1" priority="1"/>
+    </default>
+  </default>
+
+  <worldbody>
+    <body name="robot" pos="0 0 0.1395">
+      <freejoint name="robot_free"/>
+
+      <!-- Sprung mass, 111.6 kg. Positions are from the rear axle (x forward, z up). -->
+      <geom class="ak_part" name="frame" type="box" pos="0.55 0 -0.08" size="0.70 0.32 0.015" material="ak_frame" mass="28"/>
+      <geom class="ak_part" name="battery_left" type="box" pos="0.40 0.40 -0.03" size="0.22 0.08 0.06" material="ak_dark" mass="8"/>
+      <geom class="ak_part" name="battery_right" type="box" pos="0.40 -0.40 -0.03" size="0.22 0.08 0.06" material="ak_dark" mass="8"/>
+      <geom class="ak_part" name="motor" type="cylinder" pos="0.08 -0.22 0.0" size="0.10 0.08" euler="90 0 0" material="ak_hub" mass="10"/>
+      <geom class="ak_part" name="electronics" type="box" pos="0.40 0 0.00" size="0.14 0.14 0.05" material="ak_dark" mass="6"/>
+      <geom class="ak_part" name="steering" type="box" pos="0.95 0 -0.03" size="0.06 0.10 0.05" material="ak_dark" mass="5"/>
+      <!-- Seat area, bodywork, bumpers, mounts and the ballast to reach 125 kg -->
+      <geom class="ak_part" name="body_and_ballast" type="box" pos="0.52 0 0.07" size="0.30 0.22 0.10" material="ak_body" mass="46.6"/>
+      <geom class="ak_part" name="front_bumper" type="box" pos="1.33 0 -0.06" size="0.06 0.45 0.03" material="ak_body" mass="0.01"/>
+
+      <!-- GNSS mast + antenna, straight above the rear axle -->
+      <geom class="ak_part" type="capsule" fromto="0 0 0.0  0 0 0.60" size="0.012" material="ak_dark" mass="0.01"/>
+      <geom class="ak_part" type="cylinder" pos="0 0 0.605" size="0.06 0.01" material="ak_frame" mass="0.01"/>
+      <site name="gnss" pos="0 0 0.6105" size="0.02" rgba="1 0.8 0 1"/>
+      <site name="imu" pos="0.45 0 -0.06" size="0.02" rgba="0 0.8 1 1"/>
+
+      <!-- Steered front wheels: kingpin (z) -> free-spinning wheel (y) -->
+      <body name="left_knuckle" pos="1.04 0.50 -0.0125">
+        <joint name="left_steer_joint" type="hinge" axis="0 0 1" range="-25 25" damping="5" armature="0.02"/>
+        <geom class="ak_part" type="capsule" fromto="0 -0.05 0  0 0 0" size="0.012" material="ak_frame" mass="0.3"/>
+        <body name="front_left_wheel">
+          <joint name="front_left_spin" type="hinge" axis="0 1 0" damping="0.02"/>
+          <geom class="ak_tyre" name="front_left_wheel_geom" size="0.127 0.0575" mass="1.8"/>
+        </body>
+      </body>
+      <body name="right_knuckle" pos="1.04 -0.50 -0.0125">
+        <joint name="right_steer_joint" type="hinge" axis="0 0 1" range="-25 25" damping="5" armature="0.02"/>
+        <geom class="ak_part" type="capsule" fromto="0 0.05 0  0 0 0" size="0.012" material="ak_frame" mass="0.3"/>
+        <body name="front_right_wheel">
+          <joint name="front_right_spin" type="hinge" axis="0 1 0" damping="0.02"/>
+          <geom class="ak_tyre" name="front_right_wheel_geom" size="0.127 0.0575" mass="1.8"/>
+        </body>
+      </body>
+
+      <!-- Solid rear axle with both driven wheels; motor, regen and hydraulic brake act on it -->
+      <body name="rear_axle">
+        <joint name="rear_axle_joint" type="hinge" axis="0 1 0" damping="0.05" armature="0.05"/>
+        <geom class="ak_part" type="capsule" fromto="0 0.60 0  0 -0.60 0" size="0.025" material="ak_frame" mass="4"/>
+        <geom class="ak_tyre" name="rear_left_wheel_geom" pos="0 0.575 0" size="0.1395 0.09" mass="2.5"/>
+        <geom class="ak_tyre" name="rear_right_wheel_geom" pos="0 -0.575 0" size="0.1395 0.09" mass="2.5"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <!-- Net rear-axle torque (N m): motor or regen + hydraulic brake, computed in kart.py -->
+    <motor name="axle_torque" joint="rear_axle_joint" ctrlrange="-400 400" ctrllimited="true"/>
+    <!-- Steering servos: ctrl = wheel angle (rad, + = left). kart.py rate-limits and delays it. -->
+    <position name="steer_left"  joint="left_steer_joint"  kp="600" kv="10" ctrlrange="-0.4363 0.4363" forcerange="-150 150"/>
+    <position name="steer_right" joint="right_steer_joint" kp="600" kv="10" ctrlrange="-0.4363 0.4363" forcerange="-150 150"/>
+  </actuator>
+
+  <sensor>
+    <accelerometer name="imu_accel" site="imu"/>
+    <gyro name="imu_gyro" site="imu"/>
+    <framepos name="gnss_pos" objtype="site" objname="gnss"/>
+    <jointvel name="rear_axle_vel" joint="rear_axle_joint"/>
+  </sensor>
+</mujoco>

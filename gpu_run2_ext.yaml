@@ -1,0 +1,23 @@
+# Extension of GPU run 2 from 200M to 500M (scripts/gpu/train.py --config gpu_run2_ext.yaml --resume ...).
+# Run 2's training laps stalled at ~43.7 s from ~130M while the exploration noise crept back up
+# (std 0.09 -> 0.16) and the updates stayed coarse (KL ~0.012, ~15% of samples clipped).
+# For fine-tuning: no entropy bonus, half the target policy change, a lower learning-rate
+# ceiling and twice the data per update. Reward, sim and network unchanged.
+
+envs: 4096
+steps: 500_000_000
+ckpt_every: 5_000_000      # ~60 more checkpoints
+curriculum_at: 1_000_000
+ramp: 1_000_000
+seed: 3
+
+ppo:
+  n_steps: 64              # (run 2: 32) -> 262k samples per update
+  minibatches: 16          # -> 16k samples per gradient step
+  n_epochs: 10
+  ent_coef: 0.0            # (run 2: 0.001 from gps.yaml)
+  learning_rate: 0.0003    # start; then adaptive
+  lr_schedule: adaptive
+  desired_kl: 0.005        # (run 2: 0.01)
+  lr_min: 0.00001
+  lr_max: 0.0005           # (run 2: 0.001)

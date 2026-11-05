@@ -1,0 +1,20 @@
+# Fine-tune a CPU-trained checkpoint on the GPU (scripts/gpu/train.py --config gpu_ft.yaml --init <ckpt>):
+# run 2's learning settings, harsh laps (10%) from the start since the model has seen them,
+# and a gentler learning-rate ceiling so the good starting point isn't thrown away.
+
+envs: 4096
+steps: 50_000_000
+ckpt_every: 500_000        # ~100 checkpoints
+curriculum_at: 0
+ramp: 1
+seed: 2
+
+ppo:
+  n_steps: 32
+  minibatches: 16
+  n_epochs: 10
+  learning_rate: 0.0001
+  lr_schedule: adaptive
+  desired_kl: 0.01
+  lr_min: 0.00001
+  lr_max: 0.0003

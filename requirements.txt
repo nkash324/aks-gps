@@ -1,0 +1,9 @@
+# Install torch first (setup.ps1 / setup.sh pick the right build: CUDA on Windows, MPS/CPU on Mac).
+# Versions are floors; newer releases are fine.
+mujoco>=3.3
+numpy>=1.26
+gymnasium>=1.0
+stable-baselines3>=2.4
+pyyaml>=6.0
+psutil>=5.9
+pytest>=8.0

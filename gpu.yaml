@@ -1,0 +1,16 @@
+# GPU training of the residual driver (kart_gpu/, scripts/gpu/train.py). The sim, the
+# reward and the network come from gps.yaml (sim, 'residual'); this file only holds what
+# is different on the GPU: thousands of karts at once and the PPO batch layout.
+
+envs: 4096                 # karts stepped together
+steps: 100_000_000         # total; the learning rate reaches 0 here
+ckpt_every: 1_000_000      # save ckpt/<steps>/ this often (model.zip + vecnormalize.pkl, CPU-loadable)
+curriculum_at: 1_000_000   # realistic sensors only until here (as the CPU run)
+ramp: 1_000_000            # then the harsh share ramps to gps.yaml residual.mix.harsh over this many steps
+seed: 0
+
+ppo:                       # anything not set here comes from gps.yaml residual.ppo
+  n_steps: 32              # per kart per update -> 4096 x 32 = 131k steps per update
+  minibatches: 8           # -> 16k samples per gradient step
+  n_epochs: 5
+  learning_rate: 0.0003    # decays linearly to 0 at 'steps'

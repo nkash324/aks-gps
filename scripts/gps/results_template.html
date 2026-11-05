@@ -1,0 +1,717 @@
+<title>Purdue GPS Kart Benchmark</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Archivo:wght@600;800&display=swap">
+<style>
+/* Layout: one reading column of findings; the track map and speed trace sit side by side,
+   tables and the lap-time strip below. Engineering-report feel: asphalt neutrals, two series hues. */
+:root {
+  --bg: #f6f7f7;
+  --surface: #ffffff;
+  --ink: #111415;
+  --ink-2: #4b5254;
+  --ink-3: #7b8386;
+  --rule: #dfe3e4;
+  --grid: #eceff0;
+  --edge: #9aa3a6;
+  --tarmac: #e9eced;
+  --s1: #2a78d6;           /* driver A, centreline */
+  --s2: #eb6834;           /* driver B, optimised line */
+  --s3: #c2399a;           /* driver C, B + learned corrections (GPU-trained on the GPU benchmark) */
+  --s4: #11837c;           /* CPU-trained C on the GPU benchmark */
+  --slow: #d93a32;         /* map line: slowing (red) */
+  --fast: #1baf7a;         /* map line: speeding up (green) */
+  --hold: #e6b400;         /* map line: holding speed (yellow) */
+  --warn-bg: #fff4dc;
+  --warn-ink: #6b4a00;
+  --warn-edge: #eda100;
+  --bad: #c43b3a;
+  --good: #1d7f3a;
+  --f-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #131617; --surface: #1b1f20; --ink: #eef1f1; --ink-2: #b9c0c2; --ink-3: #8a9396;
+    --rule: #2d3436; --grid: #252b2d; --edge: #6d777a; --tarmac: #23292b;
+    --s1: #3987e5; --s2: #d95926; --s3: #d6479f; --s4: #26a69c; --slow: #ec5f57; --fast: #199e70; --hold: #f0c534;
+    --warn-bg: #2e2510; --warn-ink: #f3d58f; --warn-edge: #c98500; --bad: #e66767; --good: #4cc276;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #131617; --surface: #1b1f20; --ink: #eef1f1; --ink-2: #b9c0c2; --ink-3: #8a9396;
+  --rule: #2d3436; --grid: #252b2d; --edge: #6d777a; --tarmac: #23292b;
+  --s1: #3987e5; --s2: #d95926; --s3: #d6479f; --s4: #26a69c; --slow: #ec5f57; --fast: #199e70; --hold: #f0c534;
+  --warn-bg: #2e2510; --warn-ink: #f3d58f; --warn-edge: #c98500; --bad: #e66767; --good: #4cc276;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  background: var(--bg); color: var(--ink); font: 15px/1.55 var(--f-body);
+  padding-block: 32px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1080px; margin: 0 auto; display: grid; gap: 40px; }
+h1, h2 { font-family: var(--f-display); text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(28px, 4.5vw, 42px); font-weight: 800; letter-spacing: -0.01em; line-height: 1.1; }
+h2 { font-size: 20px; font-weight: 600; }
+p { margin: 0; max-width: 68ch; }
+.eyebrow { font: 500 12px/1 var(--f-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+header { display: grid; gap: 14px; }
+.lead { font-size: 17px; color: var(--ink-2); }
+section { display: grid; gap: 16px; }
+.mono, td.num, .num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.tile { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 16px 18px; display: grid; gap: 4px; align-content: start; }
+.tile .k { font-size: 13px; color: var(--ink-2); display: flex; align-items: center; gap: 8px; }
+.tile .v { font: 600 30px/1.1 var(--f-mono); font-variant-numeric: tabular-nums; }
+.tile .s { font-size: 13px; color: var(--ink-3); }
+.sw { width: 10px; height: 10px; border-radius: 2px; flex: none; display: inline-block; }
+.sw.a { background: var(--s1); } .sw.b { background: var(--s2); } .sw.c { background: var(--s3); } .sw.d { background: var(--s4); }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+.dot.slow { background: var(--slow); } .dot.fast { background: var(--fast); }
+.dot.hold { background: var(--surface); border: 2px solid var(--hold); }
+.dot.a { background: var(--s1); } .dot.b { background: var(--s2); } .dot.c { background: var(--s3); } .dot.d { background: var(--s4); }
+.badge { font: 500 11px/1 var(--f-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); border: 1px solid var(--rule); border-radius: 4px; padding: 4px 7px; width: fit-content; background: var(--surface); }
+.gpuhead { display: grid; gap: 10px; }
+.gpubar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.ln { width: 18px; height: 4px; border-radius: 2px; display: inline-block; flex: none; }
+.ln.slow { background: var(--slow); } .ln.fast { background: var(--fast); }
+.ln.hold { background: var(--hold); }
+.legend .muted { color: var(--ink-3); }
+.note { color: var(--ink-2); }
+.maps2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 760px) { .maps2 { grid-template-columns: minmax(0, 1fr); } }
+.panel h3 { display: flex; align-items: center; gap: 8px; }
+svg text.halo { paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
+svg text.corner { fill: var(--ink); font-weight: 500; }
+
+.ask { background: var(--warn-bg); color: var(--warn-ink); border-left: 4px solid var(--warn-edge); border-radius: 4px; padding: 16px 20px; display: grid; gap: 8px; }
+.ask strong { font-family: var(--f-display); font-size: 16px; }
+.ask p { color: var(--warn-ink); }
+
+.pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+@media (max-width: 760px) { .pair { grid-template-columns: minmax(0, 1fr); } }
+.pair .panel { align-content: start; }
+.panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 16px; display: grid; gap: 10px; min-width: 0; position: relative; }
+.panel h3 { margin: 0; font: 600 14px/1.3 var(--f-body); }
+.panel .sub { font-size: 13px; color: var(--ink-3); }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+svg { display: block; width: 100%; height: auto; }
+svg text { fill: var(--ink-3); font: 11px var(--f-mono); }
+.tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--bg); font: 12px/1.45 var(--f-mono); padding: 6px 9px; border-radius: 4px; white-space: nowrap; z-index: 5; }
+
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; width: fit-content; }
+.seg button { font: 500 13px var(--f-body); color: var(--ink-2); background: var(--surface); border: 0; padding: 7px 14px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--rule); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.seg button:focus-visible { outline: 2px solid var(--s1); outline-offset: -2px; }
+
+.tablebox { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th { font: 500 12px var(--f-mono); letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-3); }
+tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; }
+.pill { font: 500 12px var(--f-mono); padding: 2px 8px; border-radius: 99px; border: 1px solid currentColor; }
+.pill.ok { color: var(--good); } .pill.bad { color: var(--bad); }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; }
+ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; color: var(--ink-2); }
+ul strong { color: var(--ink); font-weight: 600; }
+footer { font-size: 13px; color: var(--ink-3); }
+code { font-family: var(--f-mono); font-size: 0.92em; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">AKS · GPS stack · simulated laps · Purdue kart track</div>
+    <h1>Purdue GPS Kart Benchmark</h1>
+    <p class="lead">Two Pure Pursuit drivers lapping the RTK-surveyed Purdue track in the new 2D kart sim, seeing only what the real sensors would give them: RTK GNSS, IMU and the wheel encoder, fused by one EKF. Driver C is B with a learned neural-network correction on top. Each cell is 30 standing-start laps with a different randomised kart and sensor errors, the same 30 for every driver.</p>
+  </header>
+
+  <section>
+    <div class="tiles" id="tiles"></div>
+  </section>
+
+  <section class="ask">
+    <strong>Where the margin goes</strong>
+    <p>The map is assumed calibrated at the track (a few known points measured with the kart's GPS), leaving at most ±5 cm of map offset plus the GNSS error itself. On that basis B finishes every lap at realistic noise, but its closest tyre came within about 2 cm of an edge. Pure Pursuit cuts corners by about 0.2 m of the 0.3 m buffer even with perfect sensors. At harsh noise the RTK float episodes (up to 0.6 m off) push it over 4 times in 30. The second toggle below shows what happens if the map is off by up to 0.3 m.</p>
+  </section>
+
+  <section>
+    <h2>One lap, realistic sensors</h2>
+    <p class="note">Seed 0, the same kart and sensor errors for both drivers. On the A and B maps a black tick marks every 0.25 s (4 per second); on the combined map a dot marks every 0.5 s. Either way <b>wide gaps mean fast and bunched marks mean slow</b>. The <b>line colour shows what the kart is doing</b> and changes colour the moment that changes. Start/finish is on the bottom straight; the kart runs counter-clockwise. Hover a tick or dot for the details.</p>
+    <div class="legend phases">
+      <span><i class="ln slow"></i>Slowing (regen / brake)</span>
+      <span><i class="ln hold"></i>Holding speed</span>
+      <span><i class="ln fast"></i>Speeding up</span>
+      <span class="muted">Labels: slowest speed through each corner</span>
+    </div>
+    <div class="maps2">
+      <div class="panel">
+        <h3><i class="sw a"></i>A · centreline</h3>
+        <svg id="mapA" role="img" aria-label="Driver A's lap: black ticks every 0.25 s, line red when slowing, yellow when holding speed, green when speeding up"></svg>
+        <div class="tip" hidden></div>
+      </div>
+      <div class="panel">
+        <h3><i class="sw b"></i>B · optimised line</h3>
+        <svg id="mapB" role="img" aria-label="Driver B's lap: black ticks every 0.25 s, line red when slowing, yellow when holding speed, green when speeding up"></svg>
+        <div class="tip" hidden></div>
+      </div>
+    </div>
+    <div class="pair">
+      <div class="panel">
+        <h3>A and B together</h3>
+        <div class="legend"><span><i class="dot a"></i>A · centreline</span><span><i class="dot b"></i>B · optimised line</span></div>
+        <svg id="mapAB" role="img" aria-label="Both laps on one map: line and dots every 0.5 s in each driver colour"></svg>
+        <div class="tip" hidden></div>
+      </div>
+      <div class="panel" id="speedPanel">
+        <h3>Speed along the lap (m/s)</h3>
+        <div class="sub">Same two laps. B brakes later and carries more speed through the bends.</div>
+        <div class="legend"><span><i class="sw a"></i>A · centreline</span><span><i class="sw b"></i>B · optimised line</span></div>
+        <svg id="speed" role="img" aria-label="Speed against distance for both drivers"></svg>
+        <div class="tip" id="speedTip" hidden></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="cSection" hidden>
+    <h2>Driver C · B plus learned corrections</h2>
+    <p class="note" id="cNote">C drives exactly like B, with a small neural network adding a correction 20 times a second: up to ±1 m/s on B's target speed and ±0.02 1/m on its steering curvature, with no added speed during a GNSS outage. It sees only what B sees (the EKF estimate, the map and the GNSS status). Each row is a training checkpoint, run on the same 30 laps per sensor level as A and B with no exploration noise. These checkpoints trained for up to 1M steps (about 1,000 laps) on <b>realistic sensors only</b>, so the perfect and harsh columns test laps they never trained on. "Avg correction" is the mean size of the correction as a share of its maximum.</p>
+    <div class="tablebox"><table id="cTbl"></table></div>
+    <ul>
+      <li><strong>Phase 1 makes C a little faster than B, not yet safer.</strong> At realistic noise the 1M checkpoint is 0.46 s quicker but went off on 1 lap in 30. The 250k checkpoint is 0.21 s quicker, with all 30 laps and more room to the edge than B.</li>
+      <li><strong>The gain carries over to sensor levels C never trained on.</strong> With perfect sensors the 1M checkpoint is 0.41 s quicker than B and keeps more room to the edge (0.14 m vs 0.10 m). At harsh noise most checkpoints finish 27/30 against B's 26/30.</li>
+      <li><strong>Harsh noise is still the weak spot.</strong> RTK float episodes push C off just as they push B. Training phase 2 mixes in harsh laps (up to 40%) to teach it to back off when the fix is lost.</li>
+      <li><strong>Progress isn't steady between checkpoints.</strong> 750k is no faster than B, while 1M is the fastest. Phase 2 saves checkpoints more often and ranks them on separate laps, then benchmarks the top three here.</li>
+    </ul>
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+      <span class="note">Lap on the map:</span>
+      <div class="seg" id="cPick" role="group" aria-label="Checkpoint shown on the map and speed trace"></div>
+      <div class="seg"><button id="cOverlay" aria-pressed="false">Overlay B</button></div>
+    </div>
+    <div class="pair">
+      <div class="panel">
+        <h3 id="cMapTitle">C</h3>
+        <div class="legend phases" id="cLegPhase">
+          <span><i class="ln slow"></i>Slowing (regen / brake)</span>
+          <span><i class="ln hold"></i>Holding speed</span>
+          <span><i class="ln fast"></i>Speeding up</span>
+          <span class="muted">Ticks every 0.25 s · labels: slowest speed through each corner</span>
+        </div>
+        <div class="legend" id="cLegDots" hidden><span><i class="dot b"></i>B · optimised line</span><span><i class="dot c"></i><span id="cLegend">C</span></span></div>
+        <svg id="mapBC" role="img" aria-label="Driver B's and driver C's laps on one map: dots every 0.5 s"></svg>
+        <div class="tip" hidden></div>
+      </div>
+      <div class="panel">
+        <h3>Speed along the lap (m/s)</h3>
+        <div class="sub">Seed 0, realistic sensors: the same kart and sensor errors as the A and B laps above.</div>
+        <div class="legend"><span id="cLegB2" hidden><i class="sw b"></i>B · optimised line</span><span><i class="sw c"></i><span id="cLegend2">C</span></span></div>
+        <svg id="speedBC" role="img" aria-label="Speed against distance for driver B and driver C"></svg>
+        <div class="tip" id="speedBCTip" hidden></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="gpuSection" hidden>
+    <div class="gpuhead">
+      <div class="badge">GPU sim · not the CPU seeds</div>
+      <h2 id="gpuTitle">GPU benchmark</h2>
+      <p class="note" id="gpuNote"></p>
+    </div>
+    <div class="gpubar">
+      <span class="note">Sensors:</span>
+      <div class="seg" id="gpuLevel" role="group" aria-label="Sensor level of the GPU benchmark">
+        <button data-lv="perfect" aria-pressed="false">Perfect</button>
+        <button data-lv="realistic" aria-pressed="true">Realistic</button>
+        <button data-lv="harsh" aria-pressed="false">Harsh</button>
+      </div>
+    </div>
+    <div class="tablebox"><table id="gpuTbl"></table></div>
+    <div class="panel">
+      <h3>Lap time against B on the same laps</h3>
+      <div class="sub">Each driver drove the same laps as B (same kart and sensor errors). The thick bar holds the middle half of the laps, the thin line 80% of them, the ring is the median. Left of the B line is faster than B. Only laps both finished count.</div>
+      <svg id="gpuDelta" role="img" aria-label="Lap-time difference to driver B per driver, on the laps both finished"></svg>
+      <div class="tip" id="gpuDeltaTip" hidden></div>
+    </div>
+    <div class="gpubar">
+      <span class="note">Lap on the map:</span>
+      <div class="seg" id="gpuPick" role="group" aria-label="Driver shown on the GPU map and speed trace"></div>
+      <div class="seg"><button id="gpuOverlay" aria-pressed="true">Overlay B</button></div>
+    </div>
+    <div class="pair">
+      <div class="panel">
+        <h3 id="gpuMapTitle">Map</h3>
+        <div class="legend phases" id="gpuLegPhase" hidden>
+          <span><i class="ln slow"></i>Slowing (regen / brake)</span>
+          <span><i class="ln hold"></i>Holding speed</span>
+          <span><i class="ln fast"></i>Speeding up</span>
+          <span class="muted">Ticks every 0.25 s · labels: slowest speed through each corner</span>
+        </div>
+        <div class="legend" id="gpuLegDots"><span><i class="dot b"></i>B · optimised line</span><span><i class="dot" id="gpuLegSw"></i><span id="gpuLegName"></span></span></div>
+        <svg id="mapGpu" role="img" aria-label="A lap on the GPU benchmark on the track map"></svg>
+        <div class="tip" hidden></div>
+      </div>
+      <div class="panel">
+        <h3>Speed along the lap (m/s)</h3>
+        <div class="sub">GPU lap 0, realistic sensors: the same kart and sensor errors for every driver.</div>
+        <div class="legend"><span id="gpuLegB2"><i class="sw b"></i>B · optimised line</span><span><i class="sw" id="gpuLegSw2"></i><span id="gpuLegName2"></span></span></div>
+        <svg id="speedGpu" role="img" aria-label="Speed against distance on the GPU lap"></svg>
+        <div class="tip" id="speedGpuTip" hidden></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>All runs</h2>
+    <div class="seg" role="group" aria-label="Map offset scenario">
+      <button id="btnPlanned" aria-pressed="true">Map calibrated (±0.05 m)</button>
+      <button id="btnAligned" aria-pressed="false">Stress test: map off ±0.3 m</button>
+    </div>
+    <div class="tablebox"><table id="tbl"></table></div>
+    <div class="panel" id="stripPanel">
+      <h3>Every lap</h3>
+      <div class="sub">One row per driver and sensor level; each dot is one run, placed by its lap time. The small up-and-down spread inside a row only keeps dots from covering each other and means nothing. Rings in the "off" column are runs that ended off track. Hover for the details.</div>
+      <svg id="strip" role="img" aria-label="Lap times for every run"></svg>
+      <div class="tip" id="stripTip" hidden></div>
+    </div>
+  </section>
+
+  <section class="cols">
+    <div style="display:grid;gap:12px;min-width:0">
+      <h2>The kart model</h2>
+      <div class="tablebox"><table>
+        <tr><th>Check</th><th class="num">Sim</th></tr>
+        <tr><td>Mass, front share</td><td class="num">125 kg, 45%</td></tr>
+        <tr><td>0–10 m/s</td><td class="num">3.0 s</td></tr>
+        <tr><td>Top speed (motor limit)</td><td class="num">11.8 m/s</td></tr>
+        <tr><td>12→0, regen only</td><td class="num">4.0 s, 20.9 m</td></tr>
+        <tr><td>12→0, regen + hydraulic</td><td class="num">2.9 s, 17.4 m</td></tr>
+        <tr><td>Peak braking (rear only)</td><td class="num">4.8 m/s²</td></tr>
+        <tr><td>Steering lock to lock</td><td class="num">0.56 s</td></tr>
+        <tr><td>Skidpad, 8 m radius</td><td class="num">1.15 g</td></tr>
+      </table></div>
+    </div>
+    <div style="display:grid;gap:12px;min-width:0;align-content:start">
+      <h2>What's in the sim</h2>
+      <ul>
+        <li><strong>Kart:</strong> four tyres with load-dependent grip and combined slip, weight transfer, solid rear axle that scrubs in corners, steering jacking, motor and battery-limited regen, hydraulic rear brake held at the bite point, steering delay and rate limit.</li>
+        <li><strong>Randomised per run:</strong> grip ±15%, mass, motor force, regen power, brake force and timing, steering rate and delay, jacking.</li>
+        <li><strong>Sensors:</strong> RTK at 20 Hz with 50 ms delay, noise, wander, float episodes and dropouts; IMU with bias; wheel encoder with scale error. Map calibrated at the track to within ±0.05 m.</li>
+        <li><strong>Off track:</strong> any part of any tyre past a surveyed edge. The pit-lane openings count as edges.</li>
+        <li><strong>Drivers:</strong> Pure Pursuit, look-ahead 0.35 × speed + 1 m (2–6 m), tuned once on separate seeds. Speed plans: 0.6 g cornering, 4 m/s² braking, 11.5 m/s cap. Both slow down on RTK float or GNSS loss.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>Generated by <code>scripts/gps/results_page.py</code> from <code>runs/gps/benchmark.json</code> and <code>benchmark_offset.json</code>; driver C from <code>scripts/gps/benchmark_residual.py</code> (<code>runs/gps/benchmark_c.json</code>); GPU benchmark from <code>scripts/gpu/benchmark.py</code> (<code>runs/gpu/benchmark_gpu.json</code>). Simulation only; the kart numbers are BOM-based estimates until fitted to real laps.</footer>
+</div>
+
+<script>
+const D = /*DATA*/null;
+const NS = "http://www.w3.org/2000/svg";
+const DRV = { pp_centre: { name: "A · centreline", short: "A", sw: "a", c: "var(--s1)" },
+              pp_optimised: { name: "B · optimised line", short: "B", sw: "b", c: "var(--s2)" } };
+for (const k of D.extra) DRV[k] = { name: k + " · learned", short: k, sw: "c", c: "var(--s3)" };
+const DRIVERS = ["pp_centre", "pp_optimised", ...D.extra];
+const LEVELS = ["perfect", "realistic", "harsh"];
+// GPU benchmark drivers live under "gpu:<name>" so they never mix with the CPU rows
+const gpuKind = k => k === "B" ? "b" : k.startsWith("C ") ? "d" : "c";
+const gpuName = k => k === "B" ? "B · optimised line" : k.startsWith("C ") ? `${k} · CPU-trained` : `${k} · GPU-trained`;
+if (D.gpu) for (const k of D.gpu.drivers) {
+  const kind = gpuKind(k);
+  DRV["gpu:" + k] = { name: gpuName(k), short: k, sw: kind, c: `var(--s${{ b: 2, c: 3, d: 4 }[kind]})` };
+  if (D.gpu.traces[k]) D.traces["gpu:" + k] = D.gpu.traces[k];
+}
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+const f2 = v => v == null ? "–" : v.toFixed(2);
+
+/* ---------- tiles */
+(function tiles() {
+  const s = D.summary.calibrated, a = D.summary.offset;
+  const A = s["pp_centre/realistic"], B = s["pp_optimised/realistic"], Bh = s["pp_optimised/harsh"];
+  const gap = A.lap_mean - B.lap_mean;
+  const t = [
+    { k: '<i class="sw b"></i>B · optimised, realistic', v: f2(B.lap_mean) + " s", s: `${B.finished}/${B.runs} laps finished · ±${f2(B.lap_std)} s` },
+    { k: '<i class="sw a"></i>A · centreline, realistic', v: f2(A.lap_mean) + " s", s: `${A.finished}/${A.runs} laps finished · ±${f2(A.lap_std)} s` },
+    { k: "B gains per lap", v: gap.toFixed(1) + " s", s: `${(100 * gap / A.lap_mean).toFixed(0)}% faster, ${(D.lines.centreline.length - D.lines.optimised.length).toFixed(0)} m shorter line` },
+    { k: "B at harsh noise", v: `${Bh.finished}/${Bh.runs}`, s: `laps finished · RTK float episodes push it over` },
+  ];
+  if (D.extra.length) {
+    // the checkpoint that finishes most realistic laps, then the fastest
+    const rank = k => { const r = s[`${k}/realistic`]; return r.finished * 1000 - (r.lap_mean || 999); };
+    const k = D.extra.reduce((a, x) => rank(x) > rank(a) ? x : a, D.extra[0]), C = s[`${k}/realistic`];
+    t.splice(1, 0, { k: `<i class="sw c"></i>${k} · learned, realistic`, v: f2(C.lap_mean) + " s",
+      s: `${C.finished}/${C.runs} laps finished · ${(C.lap_mean - B.lap_mean >= 0 ? "+" : "−") + Math.abs(C.lap_mean - B.lap_mean).toFixed(2)} s vs B` });
+  }
+  document.getElementById("tiles").innerHTML = t.map(x =>
+    `<div class="tile"><div class="k">${x.k}</div><div class="v">${x.v}</div><div class="s">${x.s}</div></div>`).join("");
+})();
+
+/* ---------- track maps: dots every 0.25 s (A, B) and 0.5 s (combined) */
+const PHASE = { slow: "Slowing", hold: "Holding speed", fast: "Speeding up" };
+function drawMap(svgId, drivers, byPhase) {
+  const svg = document.getElementById(svgId), tip = svg.parentElement.querySelector(".tip");
+  svg.innerHTML = "";
+  const pairs = arr => { const p = []; for (let i = 0; i < arr.length; i += 2) p.push([arr[i], arr[i + 1]]); return p; };
+  const outer = pairs(D.outer), inner = pairs(D.inner);
+  const all = outer.concat(inner);
+  const xs = all.map(p => p[0]), ys = all.map(p => p[1]);
+  const x0 = Math.min(...xs) - 9, x1 = Math.max(...xs) + 9, y0 = Math.min(...ys) - 9, y1 = Math.max(...ys) + 9;
+  const W = 500, H = W * (y1 - y0) / (x1 - x0);
+  svg.setAttribute("viewBox", `0 0 ${W} ${H.toFixed(1)}`);
+  const sx = x => (x - x0) / (x1 - x0) * W, sy = y => H - (y - y0) / (y1 - y0) * H;
+  const kartW = D.kart_width / (x1 - x0) * W;            // kart width (outside of the tyres) in map units
+  const path = pts => "M" + pts.map(p => sx(p[0]).toFixed(1) + " " + sy(p[1]).toFixed(1)).join("L") + "Z";
+  el("path", { d: path(outer) + path(inner), fill: "var(--tarmac)", "fill-rule": "evenodd", stroke: "none" }, svg);
+  el("path", { d: path(outer), fill: "none", stroke: "var(--edge)", "stroke-width": 1.2 }, svg);
+  el("path", { d: path(inner), fill: "none", stroke: "var(--edge)", "stroke-width": 1.2 }, svg);
+  const sf = el("text", { x: sx(0) + 8, y: sy(0) + 20, class: "halo" }, svg); sf.textContent = "start / finish";
+  const hits = [];
+  // single-driver maps: the line shows what the kart is doing, switching colour where the phase changes.
+  // combined map: one plain line per driver in the driver colour
+  for (const k of drivers) {
+    const t = D.traces[k]; if (!t) continue;
+    if (!byPhase) {
+      el("path", { d: "M" + t.x.map((x, i) => sx(x).toFixed(1) + " " + sy(t.y[i]).toFixed(1)).join("L"),
+        fill: "none", stroke: DRV[k].c, "stroke-width": 1.5 }, svg);
+      continue;
+    }
+    for (const [a, b, ph] of t.segs) {
+      const pts = [];
+      for (let m = a; m <= b; m++) pts.push(sx(t.x[m]).toFixed(1) + " " + sy(t.y[m]).toFixed(1));
+      if (pts.length < 2) continue;
+      el("path", { d: "M" + pts.join("L"), fill: "none", stroke: `var(--${ph})`, "stroke-width": kartW,
+        "stroke-linecap": "round", "stroke-linejoin": "round" }, svg);
+    }
+  }
+  // dots: black every 0.25 s on the single-driver maps (spacing = speed), driver colour every 0.5 s on the combined map
+  for (const k of drivers) {
+    const t = D.traces[k]; if (!t) continue;
+    const marks = byPhase ? t.fine : t.dots;
+    marks.forEach((p, j) => {
+      const cx = sx(p.x), cy = sy(p.y);
+      if (byPhase) {
+        // black tick across the line, so the line colour stays visible between ticks
+        const a = marks[Math.max(0, j - 1)], b = marks[Math.min(marks.length - 1, j + 1)];
+        let ux = sx(b.x) - sx(a.x), uy = sy(b.y) - sy(a.y);
+        const n = Math.hypot(ux, uy) || 1; ux /= n; uy /= n;
+        const h = kartW / 2;                             // half-length: tick spans the full width of the path
+        el("line", { x1: cx - uy * h, y1: cy + ux * h, x2: cx + uy * h, y2: cy - ux * h,
+          stroke: "var(--ink)", "stroke-width": 1, "stroke-linecap": "butt" }, svg);
+      } else {
+        el("circle", { cx, cy, r: 2.8, fill: DRV[k].c, stroke: "var(--surface)", "stroke-width": 1 }, svg);
+      }
+      hits.push({ cx, cy, k, p });
+    });
+  }
+  for (const k of drivers) {
+    const t = D.traces[k]; if (!t) continue;
+    if (byPhase) for (const c of t.corners) {
+      const lb = el("text", { x: sx(c.lx), y: sy(c.ly) + 4, "text-anchor": "middle", class: "halo corner" }, svg);
+      lb.textContent = c.v.toFixed(1) + " m/s";
+    }
+  }
+  el("circle", { cx: sx(0), cy: sy(0), r: 4, fill: "var(--ink)", stroke: "var(--surface)", "stroke-width": 2 }, svg);
+  // hover: the nearest dot within reach
+  const ring = el("circle", { r: 6, fill: "none", stroke: "var(--ink)", "stroke-width": 1.5, visibility: "hidden" }, svg);
+  const hit = el("rect", { x: 0, y: 0, width: W, height: H, fill: "transparent" }, svg);
+  hit.addEventListener("pointermove", ev => {
+    const r = svg.getBoundingClientRect();
+    const px = (ev.clientX - r.left) / r.width * W, py = (ev.clientY - r.top) / r.height * H;
+    let best = null, bd = 12 * 12;
+    for (const q of hits) { const dd = (q.cx - px) ** 2 + (q.cy - py) ** 2; if (dd < bd) { bd = dd; best = q; } }
+    if (!best) { tip.hidden = true; ring.setAttribute("visibility", "hidden"); return; }
+    const p = best.p;
+    ring.setAttribute("cx", best.cx); ring.setAttribute("cy", best.cy); ring.setAttribute("visibility", "visible");
+    tip.innerHTML = `<b>${DRV[best.k].name}</b><br>${p.t.toFixed(1)} s · ${p.d.toFixed(0)} m into the lap<br>` +
+      `${p.v.toFixed(1)} m/s · ${PHASE[p.p].toLowerCase()} (${p.a >= 0 ? "+" : ""}${p.a.toFixed(1)} m/s²)` +
+      (p.b ? "<br>hydraulic brake on" : "");
+    tip.hidden = false;
+    const pr = svg.parentElement.getBoundingClientRect();
+    let left = ev.clientX - pr.left + 14; if (left > pr.width - 230) left -= 250;
+    tip.style.left = Math.max(4, left) + "px"; tip.style.top = (ev.clientY - pr.top + 14) + "px";
+  });
+  hit.addEventListener("pointerleave", () => { tip.hidden = true; ring.setAttribute("visibility", "hidden"); });
+}
+drawMap("mapA", ["pp_centre"], true);
+drawMap("mapB", ["pp_optimised"], true);
+drawMap("mapAB", ["pp_centre", "pp_optimised"], false);
+
+/* ---------- speed trace */
+function drawSpeed(svgId, tipId, keys) {
+  const svg = document.getElementById(svgId), tip = document.getElementById(tipId);
+  svg.innerHTML = "";
+  const W = 600, H = 300, m = { l: 36, r: 12, t: 10, b: 30 };
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const L = D.track_length, vmax = 12;
+  const sx = d => m.l + d / L * (W - m.l - m.r), sy = v => H - m.b - v / vmax * (H - m.t - m.b);
+  for (let v = 0; v <= 12; v += 3) {
+    el("line", { x1: m.l, x2: W - m.r, y1: sy(v), y2: sy(v), stroke: "var(--grid)", "stroke-width": 1 }, svg);
+    const t = el("text", { x: m.l - 6, y: sy(v) + 4, "text-anchor": "end" }, svg); t.textContent = v;
+  }
+  for (let d = 0; d <= 400; d += 100) {
+    const t = el("text", { x: sx(d), y: H - 10, "text-anchor": "middle" }, svg); t.textContent = d + " m";
+  }
+  for (const k of keys) {
+    const t = D.traces[k]; if (!t) continue;
+    const d = "M" + t.d.map((x, i) => sx(x).toFixed(1) + " " + sy(t.v[i]).toFixed(1)).join("L");
+    el("path", { d, fill: "none", stroke: DRV[k].c, "stroke-width": 2, "stroke-linejoin": "round" }, svg);
+  }
+  const cross = el("line", { y1: m.t, y2: H - m.b, stroke: "var(--ink-3)", "stroke-width": 1, visibility: "hidden" }, svg);
+  const dots = keys.map(k => el("circle", { r: 4, fill: DRV[k].c, stroke: "var(--surface)", "stroke-width": 2, visibility: "hidden" }, svg));
+  const hit = el("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent" }, svg);
+  const at = (t, d) => { let i = 0; while (i < t.d.length - 1 && t.d[i] < d) i++; return i; };
+  function move(ev) {
+    const r = svg.getBoundingClientRect();
+    const px = (ev.clientX - r.left) / r.width * W;
+    const d = Math.max(0, Math.min(L, (px - m.l) / (W - m.l - m.r) * L));
+    cross.setAttribute("x1", sx(d)); cross.setAttribute("x2", sx(d)); cross.setAttribute("visibility", "visible");
+    let rows = [`<b>${d.toFixed(0)} m</b>`];
+    keys.forEach((k, j) => {
+      const t = D.traces[k]; if (!t) return;
+      const i = at(t, d);
+      dots[j].setAttribute("cx", sx(t.d[i])); dots[j].setAttribute("cy", sy(t.v[i])); dots[j].setAttribute("visibility", "visible");
+      rows.push(`${DRV[k].short}  ${t.v[i].toFixed(1)} m/s  t ${t.t[i].toFixed(1)} s`);
+    });
+    tip.innerHTML = rows.join("<br>"); tip.hidden = false;
+    const pr = svg.parentElement.getBoundingClientRect();
+    let left = ev.clientX - pr.left + 14; if (left > pr.width - 190) left -= 210;
+    tip.style.left = left + "px"; tip.style.top = (r.top - pr.top + 20) + "px";
+  }
+  hit.addEventListener("pointermove", move);
+  hit.addEventListener("pointerleave", () => { tip.hidden = true; cross.setAttribute("visibility", "hidden"); dots.forEach(c => c.setAttribute("visibility", "hidden")); });
+}
+drawSpeed("speed", "speedTip", ["pp_centre", "pp_optimised"]);
+
+/* ---------- driver C: one row per checkpoint, B as the reference; pick which lap the map shows */
+(function driverC() {
+  if (!D.extra.length) return;
+  document.getElementById("cSection").hidden = false;
+  if (D.c_note) document.getElementById("cNote").innerHTML = D.c_note;
+  const s = D.summary.calibrated, B = "pp_optimised", b = s[`${B}/realistic`];
+  const cell = (k, lv) => {
+    const r = s[`${k}/${lv}`]; if (!r) return `<td class="num">–</td><td class="num">–</td>`;
+    return `<td class="num"><span class="pill ${r.finished === r.runs ? "ok" : "bad"}">${r.finished}/${r.runs}</span></td><td class="num">${f2(r.lap_mean)} s</td>`;
+  };
+  let h = `<tr><th>Driver</th><th class="num" colspan="2">Realistic</th><th class="num">vs B</th><th class="num">Closest to edge</th>` +
+    `<th class="num" colspan="2">Harsh</th><th class="num" colspan="2">Perfect</th><th class="num">Avg correction</th></tr>`;
+  for (const k of [B, ...D.extra]) {
+    const r = s[`${k}/realistic`];
+    const dv = k === B || r.lap_mean == null ? "–" : (r.lap_mean - b.lap_mean >= 0 ? "+" : "−") + Math.abs(r.lap_mean - b.lap_mean).toFixed(2) + " s";
+    h += `<tr><td><span style="display:inline-flex;align-items:center;gap:8px"><i class="sw ${DRV[k].sw}"></i>${DRV[k].name}</span></td>` +
+      cell(k, "realistic") + `<td class="num">${dv}</td>` +
+      `<td class="num">${r.min_clearance_worst < 0 ? "over the edge" : f2(r.min_clearance_worst) + " m"}</td>` +
+      cell(k, "harsh") + cell(k, "perfect") +
+      `<td class="num">${r.mean_abs_action != null ? Math.round(100 * r.mean_abs_action) + "%" : "0%"}</td></tr>`;
+  }
+  document.getElementById("cTbl").innerHTML = h;
+  // default lap: the checkpoint that finishes most realistic laps, then the fastest
+  const rank = k => { const r = s[`${k}/realistic`]; return r.finished * 1000 - (r.lap_mean || 999); };
+  let pick = D.extra.reduce((a, k) => rank(k) > rank(a) ? k : a, D.extra[0]);
+  const seg = document.getElementById("cPick"), ov = document.getElementById("cOverlay");
+  let overlay = false;
+  // B overlay off: C alone, drawn like the A and B maps (phase colours, 0.25 s ticks, corner speeds).
+  // B overlay on: both laps as plain lines with 0.5 s dots, like the "A and B together" map.
+  function show(k) {
+    pick = k;
+    seg.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x.dataset.k === k));
+    ov.setAttribute("aria-pressed", overlay);
+    document.getElementById("cLegend").textContent = DRV[k].name;
+    document.getElementById("cLegend2").textContent = DRV[k].name;
+    document.getElementById("cMapTitle").innerHTML = overlay ? `B and ${k} together` : `<i class="sw c"></i>${DRV[k].name}`;
+    document.getElementById("cLegPhase").hidden = overlay;
+    document.getElementById("cLegDots").hidden = !overlay;
+    document.getElementById("cLegB2").hidden = !overlay;
+    drawMap("mapBC", overlay ? [B, k] : [k], !overlay);
+    drawSpeed("speedBC", "speedBCTip", overlay ? [B, k] : [k]);
+  }
+  seg.innerHTML = D.extra.map(k => `<button data-k="${k}">${k}</button>`).join("");
+  seg.querySelectorAll("button").forEach(x => x.addEventListener("click", () => show(x.dataset.k)));
+  ov.addEventListener("click", () => { overlay = !overlay; show(pick); });
+  show(pick);
+})();
+
+/* ---------- GPU benchmark: table, lap-by-lap difference to B, map */
+(function gpu() {
+  const G = D.gpu; if (!G) return;
+  document.getElementById("gpuSection").hidden = false;
+  const n = G.laps.toLocaleString("en-US");
+  document.getElementById("gpuTitle").textContent = `GPU benchmark · ${n} laps per sensor level`;
+  document.getElementById("gpuNote").innerHTML = `Every driver drove the same ${n} laps per sensor level in the GPU copy of the sim: lap <i>j</i> has the same randomised kart, sensor errors and GPS episodes for every driver, so the drivers can be compared lap by lap. ` +
+    `These are not the CPU benchmark's seeds 0–29 above, so compare these rows with each other, not with the CPU tables. In checks against the CPU sim the GPU copy matched lap times and position error, and finished about 4 more laps in 100 at harsh noise. ` +
+    `<b>G</b> rows were trained on the GPU, the <b>C</b> row on the CPU. "Avg correction" is the mean size of the network's correction as a share of its maximum.`;
+  const S = G.summary, sw = k => `<i class="sw ${gpuKind(k)}"></i>`;
+  const sgn = v => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(2);
+  let lv = "realistic";
+  function table() {
+    let h = `<tr><th>Driver</th><th class="num">Finished</th><th class="num">Mean lap</th><th class="num">Spread</th>` +
+      `<th class="num">vs B, same laps</th><th class="num">Faster than B</th><th class="num">Off track</th>` +
+      `<th class="num">Room to edge</th><th class="num">Avg correction</th></tr>`;
+    for (const k of G.drivers) {
+      const r = S[`${k}/${lv}`]; if (!r) continue;
+      const d = G.delta[`${k}/${lv}`];
+      const share = r.finished / r.runs;
+      h += `<tr><td><span style="display:inline-flex;align-items:center;gap:8px">${sw(k)}${gpuName(k)}</span></td>` +
+        `<td class="num"><span class="pill ${share >= 0.99 ? "ok" : "bad"}">${(100 * share).toFixed(1)}%</span></td>` +
+        `<td class="num">${f2(r.lap_mean)} s</td><td class="num">±${f2(r.lap_std)}</td>` +
+        `<td class="num">${d ? sgn(d.q[2]) + " s" : "–"}</td><td class="num">${d ? Math.round(100 * d.faster) + "%" : "–"}</td>` +
+        `<td class="num">${r.off_track}</td><td class="num">${f2(r.min_clearance_median)} m</td>` +
+        `<td class="num">${Math.round(100 * (r.mean_abs_action || 0))}%</td></tr>`;
+    }
+    document.getElementById("gpuTbl").innerHTML = h;
+  }
+  function deltas() {
+    const svg = document.getElementById("gpuDelta"), tip = document.getElementById("gpuDeltaTip");
+    svg.innerHTML = "";
+    const rows = G.drivers.filter(k => G.delta[`${k}/${lv}`]);
+    const W = 900, rowH = 30, m = { l: 190, r: 150, t: 22, b: 30 };
+    const H = m.t + Math.max(1, rows.length) * rowH + m.b;
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    const qs = rows.map(k => G.delta[`${k}/${lv}`].q);
+    let lo = Math.min(0, ...qs.map(q => q[0])), hi = Math.max(0, ...qs.map(q => q[4]));
+    const pad = Math.max(0.1, (hi - lo) * 0.08); lo -= pad; hi += pad;
+    const step = (hi - lo) > 3 ? 1 : (hi - lo) > 1.2 ? 0.5 : 0.25;
+    const sx = v => m.l + (v - lo) / (hi - lo) * (W - m.l - m.r);
+    for (let i = Math.ceil(lo / step); i * step <= hi + 1e-9; i++) {
+      const v = i * step;
+      el("line", { x1: sx(v), x2: sx(v), y1: m.t, y2: H - m.b, stroke: "var(--grid)", "stroke-width": 1 }, svg);
+      const t = el("text", { x: sx(v), y: H - 10, "text-anchor": "middle" }, svg);
+      t.textContent = (i === 0 ? "0" : (v > 0 ? "+" : "−") + String(Math.abs(v))) + " s";
+    }
+    el("line", { x1: sx(0), x2: sx(0), y1: m.t - 6, y2: H - m.b, stroke: "var(--s2)", "stroke-width": 2 }, svg);
+    const bl = el("text", { x: sx(0), y: m.t - 10, "text-anchor": "middle", style: "fill:var(--ink-2)" }, svg); bl.textContent = "B";
+    rows.forEach((k, i) => {
+      const d = G.delta[`${k}/${lv}`], q = d.q, y = m.t + i * rowH + rowH / 2, c = DRV["gpu:" + k].c;
+      const lab = el("text", { x: m.l - 12, y: y + 4, "text-anchor": "end", style: "fill:var(--ink-2)" }, svg); lab.textContent = gpuName(k);
+      el("line", { x1: sx(q[0]), x2: sx(q[4]), y1: y, y2: y, stroke: c, "stroke-width": 2, "stroke-linecap": "round" }, svg);
+      el("rect", { x: sx(q[1]), y: y - 6, width: Math.max(2, sx(q[3]) - sx(q[1])), height: 12, rx: 4, fill: c, opacity: 0.85 }, svg);
+      el("circle", { cx: sx(q[2]), cy: y, r: 5, fill: "var(--surface)", stroke: c, "stroke-width": 2.5 }, svg);
+      const rt = el("text", { x: W - m.r + 12, y: y + 4, style: "fill:var(--ink-2)" }, svg);
+      rt.textContent = `faster on ${Math.round(100 * d.faster)}%`;
+      const hit = el("rect", { x: 0, y: y - rowH / 2, width: W, height: rowH, fill: "transparent" }, svg);
+      hit.addEventListener("pointermove", ev => {
+        tip.innerHTML = `<b>${gpuName(k)}</b> vs B, ${lv}<br>median ${sgn(q[2])} s · middle half ${sgn(q[1])} to ${sgn(q[3])} s<br>` +
+          `80% of laps ${sgn(q[0])} to ${sgn(q[4])} s<br>faster than B on ${Math.round(100 * d.faster)}% of ${d.n.toLocaleString("en-US")} laps both finished<br>` +
+          `only B finished ${d.only_b} · only ${k} finished ${d.only_d}`;
+        tip.hidden = false;
+        const pr = svg.parentElement.getBoundingClientRect();
+        let left = ev.clientX - pr.left + 14; if (left > pr.width - 300) left -= 320;
+        tip.style.left = Math.max(4, left) + "px"; tip.style.top = (ev.clientY - pr.top + 14) + "px";
+      });
+      hit.addEventListener("pointerleave", () => { tip.hidden = true; });
+    });
+  }
+  function setLevel(x) {
+    lv = x;
+    document.querySelectorAll("#gpuLevel button").forEach(b => b.setAttribute("aria-pressed", b.dataset.lv === lv));
+    table(); deltas();
+  }
+  document.querySelectorAll("#gpuLevel button").forEach(b => b.addEventListener("click", () => setLevel(b.dataset.lv)));
+  setLevel("realistic");
+  // map: default = the fastest learned driver that finishes at least 99% of realistic laps
+  const learned = G.drivers.filter(k => k !== "B" && G.traces[k]);
+  if (!learned.length || !G.traces.B) return;
+  const ok = learned.filter(k => S[`${k}/realistic`].finished / S[`${k}/realistic`].runs >= 0.99);
+  let pick = (ok.length ? ok : learned).reduce((a, k) => (S[`${k}/realistic`].lap_mean < S[`${a}/realistic`].lap_mean ? k : a));
+  let overlay = true;
+  const seg = document.getElementById("gpuPick"), ov = document.getElementById("gpuOverlay");
+  seg.innerHTML = learned.map(k => `<button data-k="${k}">${k}</button>`).join("");
+  function show(k) {
+    pick = k;
+    seg.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x.dataset.k === k));
+    ov.setAttribute("aria-pressed", overlay);
+    const key = "gpu:" + k, kind = gpuKind(k);
+    for (const id of ["gpuLegName", "gpuLegName2"]) document.getElementById(id).textContent = gpuName(k);
+    document.getElementById("gpuLegSw").className = "dot " + kind;
+    document.getElementById("gpuLegSw2").className = "sw " + kind;
+    document.getElementById("gpuMapTitle").innerHTML = overlay ? `B and ${k} together` : `${sw(k)}${gpuName(k)}`;
+    document.getElementById("gpuLegPhase").hidden = overlay;
+    document.getElementById("gpuLegDots").hidden = !overlay;
+    document.getElementById("gpuLegB2").hidden = !overlay;
+    drawMap("mapGpu", overlay ? ["gpu:B", key] : [key], !overlay);
+    drawSpeed("speedGpu", "speedGpuTip", overlay ? ["gpu:B", key] : [key]);
+  }
+  seg.querySelectorAll("button").forEach(x => x.addEventListener("click", () => show(x.dataset.k)));
+  ov.addEventListener("click", () => { overlay = !overlay; show(pick); });
+  show(pick);
+})();
+
+/* ---------- table + strip plot, switchable scenario */
+let scenario = "calibrated";
+function table() {
+  const s = D.summary[scenario];
+  let h = `<tr><th>Driver</th><th>Sensors</th><th class="num">Finished</th><th class="num">Mean lap</th><th class="num">Spread</th><th class="num">Best</th><th class="num">Closest to edge</th><th class="num">Peak lateral</th></tr>`;
+  for (const k of DRIVERS) for (const lv of LEVELS) {
+    const r = s[`${k}/${lv}`]; if (!r) continue;
+    const ok = r.finished === r.runs;
+    h += `<tr><td><span style="display:inline-flex;align-items:center;gap:8px"><i class="sw ${DRV[k].sw}"></i>${DRV[k].name}</span></td><td>${lv}</td>
+      <td class="num"><span class="pill ${ok ? "ok" : "bad"}">${r.finished}/${r.runs}</span></td>
+      <td class="num">${f2(r.lap_mean)} s</td><td class="num">±${f2(r.lap_std)}</td><td class="num">${f2(r.lap_best)} s</td>
+      <td class="num">${r.min_clearance_worst < 0 ? "over the edge" : f2(r.min_clearance_worst) + " m"}</td><td class="num">${f2(r.max_lat_g)} g</td></tr>`;
+  }
+  document.getElementById("tbl").innerHTML = h;
+}
+function strip() {
+  const svg = document.getElementById("strip"), tip = document.getElementById("stripTip");
+  svg.innerHTML = "";
+  const runs = D.runs[scenario];
+  const W = 900, rowH = 34, m = { l: 190, r: 70, t: 8, b: 30 };
+  const rows = []; for (const k of DRIVERS) for (const lv of LEVELS)
+    if (runs.some(r => r.driver === k && r.level === lv)) rows.push([k, lv]);
+  const H = m.t + rows.length * rowH + m.b;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const laps = runs.filter(r => r.lap != null).map(r => r.lap);
+  const lo = Math.floor(Math.min(...laps) - 0.5), hi = Math.ceil(Math.max(...laps) + 0.5);
+  const sx = v => m.l + (v - lo) / (hi - lo) * (W - m.l - m.r);
+  for (let v = lo; v <= hi; v++) {
+    el("line", { x1: sx(v), x2: sx(v), y1: m.t, y2: H - m.b, stroke: "var(--grid)", "stroke-width": 1 }, svg);
+    const t = el("text", { x: sx(v), y: H - 10, "text-anchor": "middle" }, svg); t.textContent = v + " s";
+  }
+  const offX = W - m.r / 2;
+  const ot = el("text", { x: offX, y: H - 10, "text-anchor": "middle" }, svg); ot.textContent = "off";
+  rows.forEach(([k, lv], i) => {
+    const y = m.t + i * rowH + rowH / 2;
+    const lab = el("text", { x: m.l - 12, y: y + 4, "text-anchor": "end", style: "fill:var(--ink-2)" }, svg);
+    lab.textContent = `${DRV[k].short} · ${lv}`;
+    const grp = runs.filter(r => r.driver === k && r.level === lv);
+    grp.forEach((r, j) => {
+      const jitter = ((j * 7) % 11 - 5) * 1.6;
+      const done = r.lap != null;
+      const c = el("circle", { cx: done ? sx(r.lap) : offX + ((j % 5) - 2) * 6, cy: y + jitter, r: 4,
+        fill: done ? DRV[k].c : "var(--surface)", stroke: done ? "var(--surface)" : "var(--bad)", "stroke-width": done ? 1.5 : 2 }, svg);
+      const hit = el("circle", { cx: c.getAttribute("cx"), cy: c.getAttribute("cy"), r: 9, fill: "transparent" }, svg);
+      hit.addEventListener("pointerenter", ev => {
+        tip.innerHTML = `<b>${DRV[k].name}</b>, ${lv}, seed ${r.seed}<br>${done ? "lap " + r.lap.toFixed(2) + " s" : "off track"}<br>closest to edge ${r.clear.toFixed(2)} m<br>map offset ${r.offset.toFixed(2)} m · grip ${r.mu.toFixed(2)}`;
+        tip.hidden = false;
+        const pr = svg.parentElement.getBoundingClientRect(), cr = ev.target.getBoundingClientRect();
+        let left = cr.left - pr.left + 16; if (left > pr.width - 230) left -= 250;
+        tip.style.left = left + "px"; tip.style.top = (cr.top - pr.top - 10) + "px";
+      });
+      hit.addEventListener("pointerleave", () => { tip.hidden = true; });
+    });
+  });
+}
+function setScenario(s) {
+  scenario = s;
+  document.getElementById("btnPlanned").setAttribute("aria-pressed", s === "calibrated");
+  document.getElementById("btnAligned").setAttribute("aria-pressed", s === "offset");
+  table(); strip();
+}
+document.getElementById("btnPlanned").addEventListener("click", () => setScenario("calibrated"));
+document.getElementById("btnAligned").addEventListener("click", () => setScenario("offset"));
+setScenario("calibrated");
+</script>

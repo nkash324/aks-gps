@@ -1,0 +1,863 @@
+<title>Purdue Kart GPU Benchmark</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Archivo:wght@600;800&display=swap">
+<style>
+/* Layout: one reading column, summary first (tiles, ranking table), then how training got
+   there, then lap-by-lap evidence, then the driving pattern maps. Same engineering-report
+   look as the CPU benchmark page: asphalt neutrals, one hue per driver family. */
+:root {
+  --bg: #f6f7f7;
+  --surface: #ffffff;
+  --ink: #111415;
+  --ink-2: #4b5254;
+  --ink-3: #7b8386;
+  --rule: #dfe3e4;
+  --grid: #eceff0;
+  --edge: #9aa3a6;
+  --tarmac: #e9eced;
+  --s1: #2a78d6;           /* driver A, centreline */
+  --s2: #eb6834;           /* driver B, optimised line */
+  --s3: #c2399a;           /* GPU-trained residual driver */
+  --s4: #11837c;           /* CPU-trained residual driver */
+  --slow: #d93a32;
+  --fast: #1baf7a;
+  --hold: #e6b400;
+  --bad: #c43b3a;
+  --good: #1d7f3a;
+  --note-bg: #eef3f6;
+  --note-edge: #8fa7b5;
+  --f-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #131617; --surface: #1b1f20; --ink: #eef1f1; --ink-2: #b9c0c2; --ink-3: #8a9396;
+    --rule: #2d3436; --grid: #252b2d; --edge: #6d777a; --tarmac: #23292b;
+    --s1: #3987e5; --s2: #d95926; --s3: #d6479f; --s4: #26a69c; --slow: #ec5f57; --fast: #199e70; --hold: #f0c534;
+    --bad: #e66767; --good: #4cc276; --note-bg: #1c2428; --note-edge: #4f6875;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #131617; --surface: #1b1f20; --ink: #eef1f1; --ink-2: #b9c0c2; --ink-3: #8a9396;
+  --rule: #2d3436; --grid: #252b2d; --edge: #6d777a; --tarmac: #23292b;
+  --s1: #3987e5; --s2: #d95926; --s3: #d6479f; --s4: #26a69c; --slow: #ec5f57; --fast: #199e70; --hold: #f0c534;
+  --bad: #e66767; --good: #4cc276; --note-bg: #1c2428; --note-edge: #4f6875;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  background: var(--bg); color: var(--ink); font: 15px/1.55 var(--f-body);
+  padding-block: 32px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1080px; margin: 0 auto; display: grid; gap: 40px; }
+h1, h2 { font-family: var(--f-display); text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(28px, 4.5vw, 42px); font-weight: 800; letter-spacing: -0.01em; line-height: 1.1; }
+h2 { font-size: 20px; font-weight: 600; }
+p { margin: 0; max-width: 70ch; }
+.eyebrow { font: 500 12px/1 var(--f-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+header { display: grid; gap: 14px; }
+.lead { font-size: 17px; color: var(--ink-2); }
+section { display: grid; gap: 16px; }
+.note { color: var(--ink-2); }
+.num, td.num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.tile { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 16px 18px; display: grid; gap: 4px; align-content: start; }
+.tile .k { font-size: 13px; color: var(--ink-2); display: flex; align-items: center; gap: 8px; }
+.tile .v { font: 600 30px/1.1 var(--f-mono); font-variant-numeric: tabular-nums; }
+.tile .s { font-size: 13px; color: var(--ink-3); }
+.sw { width: 10px; height: 10px; border-radius: 2px; flex: none; display: inline-block; }
+.sw.A { background: var(--s1); } .sw.B { background: var(--s2); } .sw.G { background: var(--s3); } .sw.C { background: var(--s4); }
+.ln { width: 18px; height: 4px; border-radius: 2px; display: inline-block; flex: none; }
+.ln.slow { background: var(--slow); } .ln.fast { background: var(--fast); } .ln.hold { background: var(--hold); }
+
+.callout { background: var(--note-bg); border-left: 4px solid var(--note-edge); border-radius: 4px; padding: 16px 20px; display: grid; gap: 8px; }
+.callout strong { font-family: var(--f-display); font-size: 16px; }
+.callout ul { color: var(--ink-2); }
+
+.panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 16px; display: grid; gap: 10px; min-width: 0; position: relative; align-content: start; }
+.panel h3 { margin: 0; font: 600 14px/1.3 var(--f-body); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.panel h3 .meta { font: 400 12px var(--f-mono); color: var(--ink-3); }
+.panel .sub { font-size: 13px; color: var(--ink-3); }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend .muted { color: var(--ink-3); }
+.legend svg { width: auto; flex: none; display: inline-block; }
+svg { display: block; width: 100%; height: auto; }
+svg text { fill: var(--ink-3); font: 11px var(--f-mono); }
+svg text.halo { paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
+svg text.corner { fill: var(--ink); font-weight: 500; }
+.tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--bg); font: 12px/1.45 var(--f-mono); padding: 6px 9px; border-radius: 4px; white-space: nowrap; z-index: 5; }
+
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; width: fit-content; }
+.seg button { font: 500 13px var(--f-body); color: var(--ink-2); background: var(--surface); border: 0; padding: 7px 14px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--rule); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.seg button:focus-visible, .chip:focus-visible { outline: 2px solid var(--s1); outline-offset: 1px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { font: 500 13px var(--f-body); color: var(--ink-2); background: var(--surface); border: 1px solid var(--rule); border-radius: 99px; padding: 5px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; }
+.chip[aria-pressed="true"] { border-color: var(--ink-2); color: var(--ink); background: var(--tarmac); }
+.chip svg { width: 22px; height: 8px; }
+
+.tablebox { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th { font: 500 12px var(--f-mono); letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-3); }
+tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; }
+tr.group td { font: 500 12px var(--f-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); background: var(--bg); padding-block: 6px; }
+.pill { font: 500 12px var(--f-mono); padding: 2px 8px; border-radius: 99px; border: 1px solid currentColor; }
+.pill.ok { color: var(--good); } .pill.bad { color: var(--bad); }
+.best { font-weight: 600; color: var(--ink); }
+.runsTitle { margin: 8px 0 0; font: 600 16px/1.3 var(--f-display); }
+.runs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 760px) { .runs { grid-template-columns: minmax(0, 1fr); } }
+.maps { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+.maphead { display: grid; gap: 4px; }
+.maprow { display: grid; gap: 8px; }
+.maprow > .eyebrow { padding-top: 4px; }
+ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; color: var(--ink-2); }
+ul strong { color: var(--ink); font-weight: 600; }
+footer { font-size: 13px; color: var(--ink-3); }
+code { font-family: var(--f-mono); font-size: 0.92em; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+#rpScrub { flex: 1; min-width: 160px; accent-color: var(--ink); }
+#rpMap { max-width: 760px; margin: 0 auto; }
+.rpread { display: grid; grid-template-columns: max-content 1fr; gap: 2px 16px; font: 13px/1.5 var(--f-mono); font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.rpread span:nth-child(odd) { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-3); }
+
+.fsbtn { position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; display: grid; place-items: center; padding: 0;
+  border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); color: var(--ink-2); cursor: pointer; z-index: 6; }
+.fsbtn:hover { color: var(--ink); border-color: var(--ink-3); }
+.fsbtn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.panel > h3, .panel > .maphead { padding-right: 38px; }
+.panel.full { position: fixed; inset: 0; z-index: 50; border-radius: 0; border: 0; overflow: auto;
+  padding: max(20px, env(safe-area-inset-top, 0px)) max(20px, env(safe-area-inset-right, 0px)) max(20px, env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-left, 0px)); }
+.panel.full svg[role=img] { max-height: calc(100vh - 170px); max-width: none; width: 100%; }
+.panel.full .fsbtn { top: max(14px, env(safe-area-inset-top, 0px)); right: max(14px, env(safe-area-inset-right, 0px)); }
+body.has-full { overflow: hidden; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">AKS · GPS stack · residual driver · GPU sim · Purdue kart track</div>
+    <h1>Purdue Kart GPU Benchmark</h1>
+    <p class="lead" id="lead">Every checkpoint of both training runs, driven on the GPU copy of the kart sim next to the two Pure Pursuit line followers. The learned drivers are driver B with a small neural-network correction on its target speed and steering, trained once on the CPU and once on the GPU.</p>
+  </header>
+
+  <section><div class="tiles" id="tiles"></div></section>
+
+  <section>
+    <h2>Ranking</h2>
+    <p class="note" id="rankNote"></p>
+    <div class="bar">
+      <span class="note">Sensors:</span>
+      <div class="seg" id="lvl" role="group" aria-label="Sensor level">
+        <button data-lv="perfect" aria-pressed="false">Perfect</button>
+        <button data-lv="realistic" aria-pressed="true">Realistic</button>
+        <button data-lv="harsh" aria-pressed="false">Harsh</button>
+      </div>
+    </div>
+    <div class="tablebox"><table id="tbl"></table></div>
+    <div class="panel">
+      <h3>Lap time against B on the same laps</h3>
+      <div class="sub">Each driver drove the same laps as B (same kart and sensor errors). The thick bar holds the middle half of the laps, the thin line 80% of them, the ring is the median. Left of the B line is faster. Only laps both finished count. Driver A (about 4.5 s slower) is in the table only.</div>
+      <svg id="delta" role="img" aria-label="Lap-time difference to driver B per driver"></svg>
+      <div class="tip" id="deltaTip" hidden></div>
+    </div>
+  </section>
+
+  <section id="checkSec" hidden>
+    <h2>Does the GPU benchmark hold up on the CPU?</h2>
+    <p class="note" id="checkNote"></p>
+    <div class="bar">
+      <span class="note">Sensors:</span>
+      <div class="seg" id="ckLvl" role="group" aria-label="Sensor level for the CPU check">
+        <button data-lv="perfect" aria-pressed="false">Perfect</button>
+        <button data-lv="realistic" aria-pressed="true">Realistic</button>
+        <button data-lv="harsh" aria-pressed="false">Harsh</button>
+      </div>
+    </div>
+    <div class="tablebox"><table id="ckTbl"></table></div>
+    <div class="panel">
+      <h3>Mean lap time: GPU benchmark against the CPU reference</h3>
+      <div class="legend">
+        <span><svg viewBox="0 0 22 10" width="22" height="10"><line x1="2" y1="5" x2="20" y2="5" stroke="var(--ink-2)" stroke-width="2"/><circle cx="11" cy="5" r="4" fill="var(--surface)" stroke="var(--ink-2)" stroke-width="2"/></svg>CPU, 30 laps (bar: ±2 standard errors)</span>
+        <span><svg viewBox="0 0 12 12" width="12" height="12"><rect x="2" y="2" width="8" height="8" transform="rotate(45 6 6)" fill="var(--ink-2)"/></svg>GPU, 1,000 laps</span>
+      </div>
+      <svg id="ckDots" role="img" aria-label="Mean lap time per driver on the GPU and on the CPU"></svg>
+      <div class="tip" id="ckTip" hidden></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>How training got there</h2>
+    <p class="note" id="progNote"></p>
+    <div class="legend">
+      <span><i class="sw C"></i>CPU-trained checkpoint</span>
+      <span><i class="sw G"></i>GPU-trained checkpoint</span>
+      <span><svg viewBox="0 0 22 8" width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke="var(--s2)" stroke-width="2" stroke-dasharray="4 3"/></svg>Driver B</span>
+      <span class="muted">Filled: finishes at least as many laps as B · hollow: fewer · ringed: in the top 5</span>
+    </div>
+    <div class="panel">
+      <h3>Mean lap time, realistic sensors <span class="meta" id="progLapMeta"></span></h3>
+      <svg id="progLap" role="img" aria-label="Mean realistic lap time of every checkpoint against training steps"></svg>
+      <div class="tip" id="progLapTip" hidden></div>
+    </div>
+    <div class="panel">
+      <h3>Laps finished <span class="meta" id="progFinMeta"></span></h3>
+      <div class="seg" id="finLvl" role="group" aria-label="Sensor level for laps finished">
+        <button data-lv="realistic" aria-pressed="true">Realistic</button>
+        <button data-lv="harsh" aria-pressed="false">Harsh</button>
+      </div>
+      <svg id="progFin" role="img" aria-label="Share of laps finished by every checkpoint against training steps"></svg>
+      <div class="tip" id="progFinTip" hidden></div>
+    </div>
+    <h3 class="runsTitle">Each run on its own scale</h3>
+    <p class="note">The same screening numbers, one run per column with an even step axis, so the spacing between checkpoints is true to how long each one trained.</p>
+    <div class="runs" id="runCharts"></div>
+  </section>
+
+  <section>
+    <h2>Driving patterns on one lap</h2>
+    <p class="note">GPU lap 0 with realistic sensors: the same randomised kart and sensor errors for every driver. The line colour shows what the kart is doing, a black tick marks every 0.25 s (<b>wide gaps mean fast, bunched ticks mean slow</b>), and the labels give the slowest speed through each corner. Start/finish is on the bottom straight; the kart runs counter-clockwise. Hover a tick for the details.</p>
+    <div class="legend">
+      <span><i class="ln slow"></i>Slowing (regen / brake)</span>
+      <span><i class="ln hold"></i>Holding speed</span>
+      <span><i class="ln fast"></i>Speeding up</span>
+    </div>
+    <div id="mapRows" class="maprow"></div>
+    <div class="panel" id="replay">
+      <h3 id="rpTitle">Replay</h3>
+      <div class="sub" id="replayNote"></div>
+      <div class="bar">
+        <div class="seg"><button id="rpPlay" aria-pressed="false">Play</button><button id="rpRestart">Restart</button></div>
+        <div class="seg" id="rpSpeed" role="group" aria-label="Playback speed"><button data-s="1" aria-pressed="true">1×</button><button data-s="2" aria-pressed="false">2×</button><button data-s="4" aria-pressed="false">4×</button></div>
+        <input type="range" id="rpScrub" min="0" max="1000" value="0" step="1" aria-label="Time in the lap">
+      </div>
+      <svg id="rpMap" role="img" aria-label="Animated replay of the best GPU model and driver B on the track map"></svg>
+      <div class="rpread" id="rpRead" aria-live="off"></div>
+    </div>
+    <div class="panel">
+      <h3>Speed along the lap (m/s)</h3>
+      <div class="sub">The same lap. Pick the drivers to compare; ranks 2 and 3 of a training type are dashed and dotted.</div>
+      <div class="chips" id="spdChips" role="group" aria-label="Drivers shown on the speed trace"></div>
+      <svg id="speed" role="img" aria-label="Speed against distance along the lap"></svg>
+      <div class="tip" id="speedTip" hidden></div>
+    </div>
+  </section>
+
+  <section class="callout">
+    <strong>Reading these numbers</strong>
+    <ul id="caveats"></ul>
+  </section>
+
+  <footer>Generated by <code>scripts/gpu/results_page.py</code> from <code>scripts/gpu/bench_all.py</code> (<code>runs/gpu/bench_all/stage1.json</code>, <code>stage2.json</code>). Simulation only; the kart numbers are BOM-based estimates until fitted to real laps. The CPU benchmark page (seeds 0–29 on the reference sim) stays the final word for anything that goes on the kart.</footer>
+</div>
+
+<script>
+const D = /*DATA*/null;
+const NS = "http://www.w3.org/2000/svg";
+const LEVELS = ["perfect", "realistic", "harsh"];
+const S2 = D.stage2, S = S2.summary, TOP = S2.top;
+const kindOf = k => k === "A" ? "A" : k === "B" ? "B" : k[0];
+const COL = { A: "var(--s1)", B: "var(--s2)", C: "var(--s4)", G: "var(--s3)" };
+const DASH = ["", "6 4", "1.5 3.5"];
+const rankOf = k => { const t = TOP[kindOf(k)]; return t ? t.indexOf(k) : 0; };
+const fullName = k => k === "A" ? "A · centreline" : k === "B" ? "B · optimised line"
+  : `${k} · ${kindOf(k) === "C" ? "CPU" : "GPU"}-trained`;
+const DRV = {};
+for (const k of D.show) DRV[k] = { name: fullName(k), short: k, c: COL[kindOf(k)], dash: DASH[Math.max(0, rankOf(k))] };
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+const f2 = v => v == null ? "–" : v.toFixed(2);
+const sgn = v => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(2);
+const pct = v => (100 * v).toFixed(1) + "%";
+const steps = n => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : Math.round(n / 1e3) + "k";
+function placeTip(tip, svg, ev, w = 260) {
+  tip.hidden = false;
+  const pr = svg.parentElement.getBoundingClientRect();
+  let left = ev.clientX - pr.left + 14; if (left > pr.width - w) left -= w + 20;
+  tip.style.left = Math.max(4, left) + "px"; tip.style.top = (ev.clientY - pr.top + 14) + "px";
+}
+
+/* ---------- header text, tiles */
+(function intro() {
+  const n1 = D.stage1.n, l1 = D.stage1.laps;
+  document.getElementById("lead").textContent =
+    `Every checkpoint of both training runs (${n1.C} from the CPU run, ${n1.G} from the GPU run), driven on the GPU copy of the kart sim next to the two Pure Pursuit line followers. ` +
+    `The learned drivers are driver B with a small neural-network correction on its target speed and steering. Every driver drives the very same laps, so they compare lap by lap.`;
+  const r = k => S[k].realistic, b = r("B");
+  const best = t => TOP[t][0];
+  const tile = (k, label) => {
+    const x = r(k), d = D.stage2.delta[`${k}/realistic`];
+    return `<div class="tile"><div class="k"><i class="sw ${kindOf(k)}"></i>${label}</div><div class="v">${f2(x.lap_mean)} s</div>` +
+      `<div class="s">${pct(x.finish_rate)} of laps finished${k !== "B" && d ? ` · ${sgn(d.q[2])} s vs B (median)` : ""}</div></div>`;
+  };
+  document.getElementById("tiles").innerHTML =
+    tile(best("G"), `Best GPU-trained · ${best("G")}`) + tile(best("C"), `Best CPU-trained · ${best("C")}`) +
+    tile("B", "B · optimised line") + tile("A", "A · centreline");
+})();
+
+/* ---------- ranking table + lap-by-lap differences */
+let lv = "realistic";
+function table() {
+  const n = S2.laps.toLocaleString("en-US");
+  document.getElementById("rankNote").innerHTML =
+    `${n} laps per sensor level for every driver. Top 5 of each training type, picked from a shortlist of ${D.stage1.shortlist.C.length} + ${D.stage1.shortlist.G.length} (the screening is below): ` +
+    `a checkpoint has to finish at least as many realistic laps as driver B, then the fastest mean realistic lap wins. "Room to edge" is the median of each lap's closest approach; "Correction" is the mean size of the network's correction as a share of its maximum.`;
+  const groups = [["Line followers", ["A", "B"]], ["CPU-trained (top 5)", TOP.C], ["GPU-trained (top 5)", TOP.G]];
+  const lapsHere = S2.order.map(k => S[k][lv]).filter(x => x && x.lap_mean != null);
+  const fastest = Math.min(...S2.order.filter(k => k !== "A" && k !== "B").map(k => S[k][lv].lap_mean ?? 999));
+  let h = `<tr><th>Driver</th><th class="num">Trained</th><th class="num">Finished</th><th class="num">Mean lap</th><th class="num">Spread</th>` +
+    `<th class="num">vs B, same laps</th><th class="num">Faster than B</th><th class="num">Off track</th><th class="num">Room to edge</th>` +
+    `<th class="num">Position error</th><th class="num">Correction</th></tr>`;
+  const b = S.B[lv];
+  for (const [g, ks] of groups) {
+    h += `<tr class="group"><td colspan="11">${g}</td></tr>`;
+    for (const k of ks) {
+      const r = S[k][lv], d = S2.delta[`${k}/${lv}`];
+      const st = S2.steps[k];
+      h += `<tr><td><span style="display:inline-flex;align-items:center;gap:8px"><i class="sw ${kindOf(k)}"></i>${fullName(k)}</span></td>` +
+        `<td class="num">${st ? steps(st) + " steps" : "–"}</td>` +
+        `<td class="num"><span class="pill ${r.finish_rate >= b.finish_rate ? "ok" : "bad"}">${pct(r.finish_rate)}</span></td>` +
+        `<td class="num${r.lap_mean === fastest ? " best" : ""}">${f2(r.lap_mean)} s</td><td class="num">±${f2(r.lap_std)}</td>` +
+        `<td class="num">${k === "B" ? "–" : d ? sgn(d.q[2]) + " s" : "–"}</td><td class="num">${k === "B" ? "–" : d ? Math.round(100 * d.faster) + "%" : "–"}</td>` +
+        `<td class="num">${r.off_track}</td><td class="num">${f2(r.clear_median)} m</td>` +
+        `<td class="num">${f2(r.pos_err_p95_median)} m</td><td class="num">${Math.round(100 * (r.action || 0))}%</td></tr>`;
+    }
+  }
+  document.getElementById("tbl").innerHTML = h;
+}
+function deltas() {
+  const svg = document.getElementById("delta"), tip = document.getElementById("deltaTip");
+  svg.innerHTML = "";
+  const rows = S2.order.filter(k => k !== "A" && k !== "B" && S2.delta[`${k}/${lv}`]);
+  const W = 900, rowH = 28, m = { l: 190, r: 140, t: 24, b: 30 };
+  const H = m.t + rows.length * rowH + m.b;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const qs = rows.map(k => S2.delta[`${k}/${lv}`].q);
+  let lo = Math.min(0, ...qs.map(q => q[0])), hi = Math.max(0, ...qs.map(q => q[4]));
+  const pad = Math.max(0.1, (hi - lo) * 0.06); lo -= pad; hi += pad;
+  const span = hi - lo, step = span > 8 ? 2 : span > 4 ? 1 : span > 1.6 ? 0.5 : 0.25;
+  const sx = v => m.l + (v - lo) / span * (W - m.l - m.r);
+  for (let i = Math.ceil(lo / step); i * step <= hi + 1e-9; i++) {
+    const v = i * step;
+    el("line", { x1: sx(v), x2: sx(v), y1: m.t, y2: H - m.b, stroke: "var(--grid)", "stroke-width": 1 }, svg);
+    const t = el("text", { x: sx(v), y: H - 10, "text-anchor": "middle" }, svg);
+    t.textContent = (i === 0 ? "0" : (v > 0 ? "+" : "−") + String(+Math.abs(v).toFixed(2))) + " s";
+  }
+  el("line", { x1: sx(0), x2: sx(0), y1: m.t - 8, y2: H - m.b, stroke: "var(--s2)", "stroke-width": 2 }, svg);
+  const bl = el("text", { x: sx(0), y: m.t - 12, "text-anchor": "middle", style: "fill:var(--ink-2)" }, svg); bl.textContent = "B";
+  rows.forEach((k, i) => {
+    const d = S2.delta[`${k}/${lv}`], q = d.q, y = m.t + i * rowH + rowH / 2, c = COL[kindOf(k)];
+    const lab = el("text", { x: m.l - 12, y: y + 4, "text-anchor": "end", style: "fill:var(--ink-2)" }, svg); lab.textContent = fullName(k);
+    el("line", { x1: sx(q[0]), x2: sx(q[4]), y1: y, y2: y, stroke: c, "stroke-width": 2, "stroke-linecap": "round" }, svg);
+    el("rect", { x: sx(q[1]), y: y - 6, width: Math.max(2, sx(q[3]) - sx(q[1])), height: 12, rx: 4, fill: c, opacity: 0.85 }, svg);
+    el("circle", { cx: sx(q[2]), cy: y, r: 5, fill: "var(--surface)", stroke: c, "stroke-width": 2.5 }, svg);
+    const rt = el("text", { x: W - m.r + 12, y: y + 4, style: "fill:var(--ink-2)" }, svg);
+    rt.textContent = `faster on ${Math.round(100 * d.faster)}%`;
+    const hit = el("rect", { x: 0, y: y - rowH / 2, width: W, height: rowH, fill: "transparent" }, svg);
+    hit.addEventListener("pointermove", ev => {
+      tip.innerHTML = `<b>${fullName(k)}</b> vs B, ${lv}<br>median ${sgn(q[2])} s · middle half ${sgn(q[1])} to ${sgn(q[3])} s<br>` +
+        `80% of laps ${sgn(q[0])} to ${sgn(q[4])} s<br>faster than B on ${Math.round(100 * d.faster)}% of ${d.n.toLocaleString("en-US")} laps both finished<br>` +
+        `only B finished ${d.only_b} · only ${k} finished ${d.only_d}`;
+      placeTip(tip, svg, ev, 320);
+    });
+    hit.addEventListener("pointerleave", () => { tip.hidden = true; });
+  });
+}
+function setLevel(x) {
+  lv = x;
+  document.querySelectorAll("#lvl button").forEach(b => b.setAttribute("aria-pressed", b.dataset.lv === lv));
+  table(); deltas();
+}
+document.querySelectorAll("#lvl button").forEach(b => b.addEventListener("click", () => setLevel(b.dataset.lv)));
+setLevel("realistic");
+
+/* ---------- GPU vs CPU check */
+(function check() {
+  const C = D.check; if (!C) return;
+  document.getElementById("checkSec").hidden = false;
+  document.getElementById("checkNote").innerHTML =
+    `${C.models.length} of the models above, run again on the CPU reference sim on its own ${C.laps} laps per level (seeds 0–${C.laps - 1}, the CPU benchmark page's laps), next to the CPU results for A and B on those same seeds. ` +
+    `The CPU and GPU laps are different random laps, so compare averages: with ${C.laps} laps the CPU mean is only good to about ±0.1–0.15 s. The useful checks are whether each model's gap to B and the order of the models agree.`;
+  {
+    let worst = 0, same = true;
+    for (const lv2 of LEVELS) {
+      for (const k of [...C.models, "A"]) {
+        const g = C.gpu_delta_b[`${k}/${lv2}`], c = C.delta_b[`${k}/${lv2}`];
+        if (g && c) worst = Math.max(worst, Math.abs(g.mean - c.mean));
+      }
+      const byG = [...C.models].sort((a, b) => C.gpu[`${a}/${lv2}`].lap_mean - C.gpu[`${b}/${lv2}`].lap_mean).join();
+      const byC = [...C.models].sort((a, b) => C.cpu[`${a}/${lv2}`].lap_mean - C.cpu[`${b}/${lv2}`].lap_mean).join();
+      same = same && byG === byC;
+    }
+    document.getElementById("checkNote").innerHTML += ` <b>Result: every model's gap to B agrees within ${worst.toFixed(2)} s at every sensor level, and the models come in ${same ? "the same order" : "a different order"} on both sims.</b>`;
+  }
+  let lv = "realistic";
+  function draw() {
+    document.querySelectorAll("#ckLvl button").forEach(b => b.setAttribute("aria-pressed", b.dataset.lv === lv));
+    let h = `<tr><th>Driver</th><th class="num">GPU mean lap</th><th class="num">CPU mean lap</th><th class="num">CPU − GPU</th>` +
+      `<th class="num">Gap to B, GPU</th><th class="num">Gap to B, CPU</th><th class="num">Finished, GPU</th><th class="num">Finished, CPU</th></tr>`;
+    const rows = C.order.filter(k => C.cpu[`${k}/${lv}`] && C.gpu[`${k}/${lv}`]);
+    for (const k of rows) {
+      const g = C.gpu[`${k}/${lv}`], c = C.cpu[`${k}/${lv}`], gd = C.gpu_delta_b[`${k}/${lv}`], cd = C.delta_b[`${k}/${lv}`];
+      const diff = c.lap_mean != null ? c.lap_mean - g.lap_mean : null;
+      h += `<tr><td><span style="display:inline-flex;align-items:center;gap:8px"><i class="sw ${kindOf(k)}"></i>${fullName(k)}</span></td>` +
+        `<td class="num">${f2(g.lap_mean)} s</td><td class="num">${f2(c.lap_mean)} s <span style="color:var(--ink-3)">±${f2(c.lap_se)}</span></td>` +
+        `<td class="num">${diff == null ? "–" : sgn(diff) + " s"}</td>` +
+        `<td class="num">${k === "B" ? "–" : gd ? sgn(gd.mean) + " s" : "–"}</td>` +
+        `<td class="num">${k === "B" ? "–" : cd ? sgn(cd.mean) + ` s <span style="color:var(--ink-3)">±${f2(cd.se)}</span>` : "–"}</td>` +
+        `<td class="num">${pct(g.finish_rate)}</td><td class="num">${c.finished}/${c.runs}</td></tr>`;
+    }
+    document.getElementById("ckTbl").innerHTML = h;
+    // dot chart
+    const svg = document.getElementById("ckDots"), tip = document.getElementById("ckTip");
+    svg.innerHTML = "";
+    const W = 900, rowH = 30, m = { l: 190, r: 30, t: 10, b: 30 }, H = m.t + rows.length * rowH + m.b;
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    const vals = rows.flatMap(k => { const c = C.cpu[`${k}/${lv}`], g = C.gpu[`${k}/${lv}`]; return [g.lap_mean, c.lap_mean - 2 * (c.lap_se || 0), c.lap_mean + 2 * (c.lap_se || 0)]; }).filter(v => v != null && isFinite(v));
+    let lo = Math.floor(Math.min(...vals) * 2) / 2, hi = Math.ceil(Math.max(...vals) * 2) / 2;
+    const step = hi - lo > 4 ? 1 : 0.5;
+    const sx = v => m.l + (v - lo) / (hi - lo) * (W - m.l - m.r);
+    for (let v = lo; v <= hi + 1e-9; v += step) {
+      el("line", { x1: sx(v), x2: sx(v), y1: m.t, y2: H - m.b, stroke: "var(--grid)", "stroke-width": 1 }, svg);
+      const t = el("text", { x: sx(v), y: H - 10, "text-anchor": "middle" }, svg); t.textContent = v.toFixed(1) + " s";
+    }
+    rows.forEach((k, i) => {
+      const y = m.t + i * rowH + rowH / 2, c = C.cpu[`${k}/${lv}`], g = C.gpu[`${k}/${lv}`], col = COL[kindOf(k)];
+      const lab = el("text", { x: m.l - 12, y: y + 4, "text-anchor": "end", style: "fill:var(--ink-2)" }, svg); lab.textContent = fullName(k);
+      if (c.lap_mean != null) {
+        const e = 2 * (c.lap_se || 0);
+        el("line", { x1: sx(c.lap_mean - e), x2: sx(c.lap_mean + e), y1: y, y2: y, stroke: col, "stroke-width": 2, "stroke-linecap": "round" }, svg);
+        el("circle", { cx: sx(c.lap_mean), cy: y, r: 5, fill: "var(--surface)", stroke: col, "stroke-width": 2.5 }, svg);
+      }
+      el("rect", { x: sx(g.lap_mean) - 4, y: y - 4, width: 8, height: 8, fill: col, stroke: "var(--surface)", "stroke-width": 1, transform: `rotate(45 ${sx(g.lap_mean)} ${y})` }, svg);
+      const hit = el("rect", { x: 0, y: y - rowH / 2, width: W, height: rowH, fill: "transparent" }, svg);
+      hit.addEventListener("pointermove", ev => {
+        tip.innerHTML = `<b>${fullName(k)}</b>, ${lv}<br>GPU ${f2(g.lap_mean)} s (1,000 laps)<br>CPU ${f2(c.lap_mean)} s ±${f2(c.lap_se)} (${c.finished}/${c.runs} finished)`;
+        placeTip(tip, svg, ev, 240);
+      });
+      hit.addEventListener("pointerleave", () => { tip.hidden = true; });
+    });
+  }
+  document.querySelectorAll("#ckLvl button").forEach(b => b.addEventListener("click", () => { lv = b.dataset.lv; draw(); }));
+  draw();
+})();
+
+/* ---------- training progress: every checkpoint, log steps axis */
+const P = D.stage1.progress, REF = D.stage1.ref;
+const inTop = new Set([...TOP.C, ...TOP.G]);
+function progChart(svgId, tipId, valueOf, refOf, fmtV, domain, ticks, opt = {}) {
+  const svg = document.getElementById(svgId), tip = document.getElementById(tipId);
+  svg.innerHTML = "";
+  const kinds = opt.kinds || ["C", "G"], lin = !!opt.linear;
+  const W = opt.W || 900, H = opt.H || 300, m = { l: 56, r: 16, t: 14, b: 34 };
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const all = kinds.flatMap(k => P[k]);
+  const smax = Math.max(...all.map(p => p.steps));
+  const x0 = lin ? 0 : Math.log10(Math.min(...all.map(p => p.steps)) / 1.25), x1 = lin ? smax * 1.03 : Math.log10(smax * 1.15);
+  const sx = s => m.l + ((lin ? s : Math.log10(s)) - x0) / (x1 - x0) * (W - m.l - m.r);
+  const [y0, y1] = domain;
+  const sy = v => H - m.b - (v - y0) / (y1 - y0) * (H - m.t - m.b);
+  for (const v of ticks) {
+    el("line", { x1: m.l, x2: W - m.r, y1: sy(v), y2: sy(v), stroke: "var(--grid)", "stroke-width": 1 }, svg);
+    const t = el("text", { x: m.l - 8, y: sy(v) + 4, "text-anchor": "end" }, svg); t.textContent = fmtV(v);
+  }
+  const xt = lin ? (() => { const st = smax > 2e7 ? 1e7 : 1e6, a = []; for (let s = 0; s <= x1; s += st) a.push(s); return a; })()
+    : [1e5, 3e5, 1e6, 3e6, 1e7, 3e7, 1e8];
+  for (const s of xt) {
+    if (!lin && (Math.log10(s) < x0 || Math.log10(s) > x1)) continue;
+    el("line", { x1: sx(s), x2: sx(s), y1: m.t, y2: H - m.b, stroke: "var(--grid)", "stroke-width": 1 }, svg);
+    const t = el("text", { x: sx(s), y: H - 12, "text-anchor": "middle" }, svg); t.textContent = s === 0 ? "0" : steps(s);
+  }
+  const xl = el("text", { x: W - m.r, y: H - 12 + 0, "text-anchor": "end" }, svg); xl.textContent = "";
+  const rb = refOf("B");
+  if (rb != null && rb >= y0 && rb <= y1) {
+    el("line", { x1: m.l, x2: W - m.r, y1: sy(rb), y2: sy(rb), stroke: "var(--s2)", "stroke-width": 2, "stroke-dasharray": "6 4" }, svg);
+    const t = el("text", { x: W - m.r - 4, y: sy(rb) - 6, "text-anchor": "end", class: "halo", style: "fill:var(--ink-2)" }, svg);
+    t.textContent = `B ${fmtV(rb)}`;
+  }
+  const hits = [];
+  for (const kind of kinds) {
+    const pts = P[kind].filter(p => valueOf(p) != null);
+    const clip = v => Math.max(y0, Math.min(y1, v));
+    el("path", { d: "M" + pts.map(p => sx(p.steps).toFixed(1) + " " + sy(clip(valueOf(p))).toFixed(1)).join("L"),
+      fill: "none", stroke: COL[kind], "stroke-width": 1.5, opacity: 0.45 }, svg);
+    for (const p of pts) {
+      const v = valueOf(p), ok = p.fin >= REF.B.fin, cx = sx(p.steps), cy = sy(clip(v));
+      if (inTop.has(p.name)) el("circle", { cx, cy, r: 8, fill: "none", stroke: "var(--ink)", "stroke-width": 1.5 }, svg);
+      el("circle", { cx, cy, r: 4, fill: ok ? COL[kind] : "var(--surface)", stroke: ok ? "var(--surface)" : COL[kind], "stroke-width": ok ? 1 : 2 }, svg);
+      hits.push({ cx, cy, p, kind, out: v < y0 || v > y1 });
+    }
+  }
+  const ring = el("circle", { r: 7, fill: "none", stroke: "var(--ink)", "stroke-width": 1.5, visibility: "hidden" }, svg);
+  const hit = el("rect", { x: 0, y: 0, width: W, height: H, fill: "transparent" }, svg);
+  hit.addEventListener("pointermove", ev => {
+    const r = svg.getBoundingClientRect();
+    const px = (ev.clientX - r.left) / r.width * W, py = (ev.clientY - r.top) / r.height * H;
+    let best = null, bd = 16 * 16;
+    for (const q of hits) { const dd = (q.cx - px) ** 2 + (q.cy - py) ** 2; if (dd < bd) { bd = dd; best = q; } }
+    if (!best) { tip.hidden = true; ring.setAttribute("visibility", "hidden"); return; }
+    const p = best.p;
+    ring.setAttribute("cx", best.cx); ring.setAttribute("cy", best.cy); ring.setAttribute("visibility", "visible");
+    tip.innerHTML = `<b>${p.name}</b> · ${best.kind === "C" ? "CPU" : "GPU"}-trained, ${p.steps.toLocaleString("en-US")} steps<br>` +
+      `realistic: ${pct(p.fin)} finished, ${f2(p.lap)} s<br>harsh: ${pct(p.hfin)} finished, ${f2(p.hlap)} s` +
+      (inTop.has(p.name) ? "<br>in the top 5" : D.stage1.shortlist[best.kind].includes(p.name) ? "<br>shortlisted" : "");
+    placeTip(tip, svg, ev, 300);
+  });
+  hit.addEventListener("pointerleave", () => { tip.hidden = true; ring.setAttribute("visibility", "hidden"); });
+}
+(function progress() {
+  const l1 = D.stage1.laps;
+  document.getElementById("progNote").innerHTML =
+    `The screening run: every checkpoint drove the same ${l1.realistic} realistic and ${l1.harsh} harsh laps. The best ${D.stage1.shortlist.C.length} of each type then drove the full benchmark above. ` +
+    `The CPU run stopped at ${steps(Math.max(...P.C.map(p => p.steps)))} steps; the GPU run went to ${steps(Math.max(...P.G.map(p => p.steps)))}. Driver A is off this chart (${f2(REF.A.lap)} s).`;
+  const laps = [...P.C, ...P.G].map(p => p.lap).filter(v => v != null);
+  const lo = Math.floor((Math.min(...laps) - 0.1) * 2) / 2, hi = Math.ceil((Math.max(REF.B.lap + 0.4, Math.min(Math.max(...laps), REF.B.lap + 1.5))) * 2) / 2;
+  const tk = []; for (let v = lo; v <= hi + 1e-9; v += 0.5) tk.push(+v.toFixed(1));
+  document.getElementById("progLapMeta").textContent = `· ${l1.realistic} laps per checkpoint`;
+  progChart("progLap", "progLapTip", p => p.lap, k => REF[k].lap, v => v.toFixed(1) + " s", [lo, hi], tk);
+  function fin(level) {
+    const key = level === "realistic" ? "fin" : "hfin";
+    const vals = [...P.C, ...P.G].map(p => p[key]);
+    const lo2 = Math.max(0, Math.floor(Math.min(...vals, REF.B[key]) * 20) / 20 - 0.05);
+    const tk2 = []; for (let v = lo2; v <= 1.0001; v += (1 - lo2) > 0.3 ? 0.1 : 0.05) tk2.push(+v.toFixed(2));
+    document.getElementById("progFinMeta").textContent = `· ${level}, ${l1[level]} laps per checkpoint`;
+    progChart("progFin", "progFinTip", p => p[key], k => REF[k][key], v => Math.round(100 * v) + "%", [lo2, 1.0], tk2);
+    document.querySelectorAll("#finLvl button").forEach(b => b.setAttribute("aria-pressed", b.dataset.lv === level));
+  }
+  document.querySelectorAll("#finLvl button").forEach(b => b.addEventListener("click", () => fin(b.dataset.lv)));
+  fin("realistic");
+  // one run per column, even step axis
+  const host = document.getElementById("runCharts");
+  const metrics = [
+    ["lap", "Mean lap time, realistic", `${l1.realistic} laps`],
+    ["fin", "Laps finished, realistic", `${l1.realistic} laps`],
+    ["hfin", "Laps finished, harsh", `${l1.harsh} laps`],
+  ];
+  for (const [key, title, n] of metrics) for (const kind of ["C", "G"]) {
+    const id = `run_${key}_${kind}`;
+    const panel = document.createElement("div"); panel.className = "panel";
+    panel.innerHTML = `<h3><i class="sw ${kind}"></i>${kind === "C" ? "CPU" : "GPU"} run · ${title} <span class="meta">· ${n} per checkpoint</span></h3>` +
+      `<svg id="${id}" role="img" aria-label="${kind === "C" ? "CPU" : "GPU"} run: ${title.toLowerCase()} per checkpoint"></svg><div class="tip" id="${id}_tip" hidden></div>`;
+    host.appendChild(panel);
+    const pts = P[kind];
+    if (key === "lap") {
+      const v = pts.map(p => p.lap).filter(x => x != null);
+      const lo = Math.floor((Math.min(...v) - 0.1) * 2) / 2, hi = Math.ceil(Math.max(REF.B.lap + 0.3, Math.max(...v)) * 2) / 2;
+      const st = hi - lo > 3 ? 1 : 0.5, tk = []; for (let x = lo; x <= hi + 1e-9; x += st) tk.push(+x.toFixed(1));
+      progChart(id, id + "_tip", p => p.lap, k => REF[k].lap, x => x.toFixed(1) + " s", [lo, hi], tk, { kinds: [kind], linear: true, W: 520, H: 260 });
+    } else {
+      const v = pts.map(p => p[key]);
+      const lo = Math.max(0, Math.floor(Math.min(...v, REF.B[key]) * 20) / 20 - 0.05);
+      const st = (1 - lo) > 0.3 ? 0.1 : 0.05, tk = []; for (let x = lo; x <= 1.0001; x += st) tk.push(+x.toFixed(2));
+      progChart(id, id + "_tip", p => p[key], k => REF[k][key], x => Math.round(100 * x) + "%", [lo, 1.0], tk, { kinds: [kind], linear: true, W: 520, H: 260 });
+    }
+  }
+})();
+
+/* ---------- maps: one per driver, phase-coloured line, 0.25 s ticks */
+const PHASE = { slow: "slowing", hold: "holding speed", fast: "speeding up" };
+function drawMap(svg, k) {
+  const tip = svg.parentElement.querySelector(".tip");
+  svg.innerHTML = "";
+  const pairs = arr => { const p = []; for (let i = 0; i < arr.length; i += 2) p.push([arr[i], arr[i + 1]]); return p; };
+  const outer = pairs(D.outer), inner = pairs(D.inner), all = outer.concat(inner);
+  const xs = all.map(p => p[0]), ys = all.map(p => p[1]);
+  const x0 = Math.min(...xs) - 9, x1 = Math.max(...xs) + 9, y0 = Math.min(...ys) - 9, y1 = Math.max(...ys) + 9;
+  const W = 500, H = W * (y1 - y0) / (x1 - x0);
+  svg.setAttribute("viewBox", `0 0 ${W} ${H.toFixed(1)}`);
+  const sx = x => (x - x0) / (x1 - x0) * W, sy = y => H - (y - y0) / (y1 - y0) * H;
+  const kartW = D.kart_width / (x1 - x0) * W;
+  const path = pts => "M" + pts.map(p => sx(p[0]).toFixed(1) + " " + sy(p[1]).toFixed(1)).join("L") + "Z";
+  el("path", { d: path(outer) + path(inner), fill: "var(--tarmac)", "fill-rule": "evenodd", stroke: "none" }, svg);
+  el("path", { d: path(outer), fill: "none", stroke: "var(--edge)", "stroke-width": 1.2 }, svg);
+  el("path", { d: path(inner), fill: "none", stroke: "var(--edge)", "stroke-width": 1.2 }, svg);
+  const t = D.traces[k]; if (!t) return;
+  for (const [a, b, ph] of t.segs) {
+    const pts = [];
+    for (let m = a; m <= b; m++) pts.push(sx(t.x[m]).toFixed(1) + " " + sy(t.y[m]).toFixed(1));
+    if (pts.length < 2) continue;
+    el("path", { d: "M" + pts.join("L"), fill: "none", stroke: `var(--${ph})`, "stroke-width": kartW,
+      "stroke-linecap": "round", "stroke-linejoin": "round" }, svg);
+  }
+  const hits = [];
+  t.fine.forEach((p, j) => {
+    const cx = sx(p.x), cy = sy(p.y);
+    const a = t.fine[Math.max(0, j - 1)], b = t.fine[Math.min(t.fine.length - 1, j + 1)];
+    let ux = sx(b.x) - sx(a.x), uy = sy(b.y) - sy(a.y);
+    const n = Math.hypot(ux, uy) || 1; ux /= n; uy /= n;
+    const h = kartW / 2;
+    el("line", { x1: cx - uy * h, y1: cy + ux * h, x2: cx + uy * h, y2: cy - ux * h, stroke: "var(--ink)", "stroke-width": 1 }, svg);
+    hits.push({ cx, cy, p });
+  });
+  for (const c of t.corners) {
+    const lb = el("text", { x: sx(c.lx), y: sy(c.ly) + 4, "text-anchor": "middle", class: "halo corner" }, svg);
+    lb.textContent = c.v.toFixed(1);
+  }
+  el("circle", { cx: sx(0), cy: sy(0), r: 4, fill: "var(--ink)", stroke: "var(--surface)", "stroke-width": 2 }, svg);
+  const ring = el("circle", { r: 6, fill: "none", stroke: "var(--ink)", "stroke-width": 1.5, visibility: "hidden" }, svg);
+  const hit = el("rect", { x: 0, y: 0, width: W, height: H, fill: "transparent" }, svg);
+  hit.addEventListener("pointermove", ev => {
+    const r = svg.getBoundingClientRect();
+    const px = (ev.clientX - r.left) / r.width * W, py = (ev.clientY - r.top) / r.height * H;
+    let best = null, bd = 14 * 14;
+    for (const q of hits) { const dd = (q.cx - px) ** 2 + (q.cy - py) ** 2; if (dd < bd) { bd = dd; best = q; } }
+    if (!best) { tip.hidden = true; ring.setAttribute("visibility", "hidden"); return; }
+    const p = best.p;
+    ring.setAttribute("cx", best.cx); ring.setAttribute("cy", best.cy); ring.setAttribute("visibility", "visible");
+    tip.innerHTML = `<b>${DRV[k].name}</b><br>${p.t.toFixed(1)} s · ${p.d.toFixed(0)} m into the lap<br>` +
+      `${p.v.toFixed(1)} m/s · ${PHASE[p.p]} (${p.a >= 0 ? "+" : ""}${p.a.toFixed(1)} m/s²)` + (p.b ? "<br>hydraulic brake on" : "");
+    placeTip(tip, svg, ev, 230);
+  });
+  hit.addEventListener("pointerleave", () => { tip.hidden = true; ring.setAttribute("visibility", "hidden"); });
+}
+(function maps() {
+  const rows = [["Line followers", ["A", "B"]], ["CPU-trained · top 3", TOP.C.slice(0, 3)], ["GPU-trained · top 3", TOP.G.slice(0, 3)]];
+  const host = document.getElementById("mapRows");
+  for (const [title, ks] of rows) {
+    const wrap = document.createElement("div"); wrap.className = "maprow";
+    wrap.innerHTML = `<div class="eyebrow">${title}</div>`;
+    const grid = document.createElement("div"); grid.className = "maps";
+    for (const k of ks) {
+      if (!D.traces[k]) continue;
+      const l0 = D.lap0[k], r = S[k].realistic;
+      const panel = document.createElement("div"); panel.className = "panel";
+      panel.innerHTML = `<div class="maphead"><h3><i class="sw ${kindOf(k)}"></i>${DRV[k].name}</h3>` +
+        `<div class="sub">This lap ${l0.lap != null ? l0.lap.toFixed(2) + " s" : "ended " + l0.end} · mean over ${S2.laps.toLocaleString("en-US")} laps ${f2(r.lap_mean)} s</div></div>` +
+        `<svg role="img" aria-label="${DRV[k].name}: lap on the track map"></svg><div class="tip" hidden></div>`;
+      grid.appendChild(panel);
+      drawMap(panel.querySelector("svg"), k);
+    }
+    wrap.appendChild(grid); host.appendChild(wrap);
+  }
+})();
+
+/* ---------- speed trace with driver chips */
+const shown = new Set(["B", TOP.C[0], TOP.G[0]].filter(k => D.traces[k]));
+function drawSpeed() {
+  const svg = document.getElementById("speed"), tip = document.getElementById("speedTip");
+  svg.innerHTML = "";
+  const keys = D.show.filter(k => shown.has(k) && D.traces[k]);
+  const W = 900, H = 320, m = { l: 36, r: 12, t: 10, b: 30 };
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const L = D.track_length, vmax = 12;
+  const sx = d => m.l + d / L * (W - m.l - m.r), sy = v => H - m.b - v / vmax * (H - m.t - m.b);
+  for (let v = 0; v <= 12; v += 3) {
+    el("line", { x1: m.l, x2: W - m.r, y1: sy(v), y2: sy(v), stroke: "var(--grid)", "stroke-width": 1 }, svg);
+    const t = el("text", { x: m.l - 6, y: sy(v) + 4, "text-anchor": "end" }, svg); t.textContent = v;
+  }
+  for (let d = 0; d <= 400; d += 50) {
+    const t = el("text", { x: sx(d), y: H - 10, "text-anchor": "middle" }, svg); t.textContent = d + " m";
+  }
+  for (const k of keys) {
+    const t = D.traces[k];
+    el("path", { d: "M" + t.d.map((x, i) => sx(x).toFixed(1) + " " + sy(t.v[i]).toFixed(1)).join("L"), fill: "none",
+      stroke: DRV[k].c, "stroke-width": 2, "stroke-linejoin": "round", "stroke-dasharray": DRV[k].dash }, svg);
+  }
+  const cross = el("line", { y1: m.t, y2: H - m.b, stroke: "var(--ink-3)", "stroke-width": 1, visibility: "hidden" }, svg);
+  const dots = keys.map(k => el("circle", { r: 4, fill: DRV[k].c, stroke: "var(--surface)", "stroke-width": 2, visibility: "hidden" }, svg));
+  const hit = el("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent" }, svg);
+  const at = (t, d) => { let i = 0; while (i < t.d.length - 1 && t.d[i] < d) i++; return i; };
+  hit.addEventListener("pointermove", ev => {
+    const r = svg.getBoundingClientRect();
+    const px = (ev.clientX - r.left) / r.width * W;
+    const d = Math.max(0, Math.min(L, (px - m.l) / (W - m.l - m.r) * L));
+    cross.setAttribute("x1", sx(d)); cross.setAttribute("x2", sx(d)); cross.setAttribute("visibility", "visible");
+    const rows = [`<b>${d.toFixed(0)} m</b>`];
+    keys.forEach((k, j) => {
+      const t = D.traces[k], i = at(t, d);
+      dots[j].setAttribute("cx", sx(t.d[i])); dots[j].setAttribute("cy", sy(t.v[i])); dots[j].setAttribute("visibility", "visible");
+      rows.push(`${k.padEnd(7)} ${t.v[i].toFixed(1)} m/s  t ${t.t[i].toFixed(1)} s`);
+    });
+    tip.innerHTML = rows.join("<br>");
+    placeTip(tip, svg, ev, 220);
+    tip.style.top = (r.top - svg.parentElement.getBoundingClientRect().top + 20) + "px";
+  });
+  hit.addEventListener("pointerleave", () => { tip.hidden = true; cross.setAttribute("visibility", "hidden"); dots.forEach(c => c.setAttribute("visibility", "hidden")); });
+}
+(function chips() {
+  const host = document.getElementById("spdChips");
+  for (const k of D.show) {
+    if (!D.traces[k]) continue;
+    const b = document.createElement("button");
+    b.className = "chip"; b.dataset.k = k; b.setAttribute("aria-pressed", shown.has(k));
+    b.innerHTML = `<svg viewBox="0 0 22 8"><line x1="1" y1="4" x2="21" y2="4" stroke="${DRV[k].c}" stroke-width="2.5" stroke-dasharray="${DRV[k].dash}" stroke-linecap="round"/></svg>${k}`;
+    b.addEventListener("click", () => {
+      shown.has(k) ? shown.delete(k) : shown.add(k);
+      b.setAttribute("aria-pressed", shown.has(k)); drawSpeed();
+    });
+    host.appendChild(b);
+  }
+  drawSpeed();
+})();
+
+/* ---------- replay: the best GPU model and B driving the same lap together */
+(function replay() {
+  const box = document.getElementById("replay");
+  const kM = Object.values(TOP).map(t => t[0]).filter(k => D.traces[k])
+    .sort((a, b) => (S[a].realistic.lap_mean ?? 999) - (S[b].realistic.lap_mean ?? 999))[0];
+  const kB = "B", tm = D.traces[kM], tb = D.traces[kB];
+  if (!tm || !tb) { box.hidden = true; return; }
+  const karts = [[kM, tm], [kB, tb]];
+  document.getElementById("rpTitle").innerHTML =
+    `Replay: <i class="sw ${kindOf(kM)}"></i>${kM} against <i class="sw B"></i>B on the same lap`;
+  document.getElementById("replayNote").textContent =
+    `GPU lap 0 with realistic sensors, the lap the maps above show: ${kM} ${tm.lap.toFixed(2)} s, B ${tb.lap.toFixed(2)} s. ` +
+    `Both positions are logged every 0.1 s and replayed together at true speed; a kart that has finished waits on the line. Drag the slider to scrub.`;
+
+  const svg = document.getElementById("rpMap");
+  const pairs = arr => { const p = []; for (let i = 0; i < arr.length; i += 2) p.push([arr[i], arr[i + 1]]); return p; };
+  const outer = pairs(D.outer), inner = pairs(D.inner), all = outer.concat(inner);
+  const xs = all.map(p => p[0]), ys = all.map(p => p[1]);
+  const x0 = Math.min(...xs) - 9, x1 = Math.max(...xs) + 9, y0 = Math.min(...ys) - 9, y1 = Math.max(...ys) + 9;
+  const W = 500, H = W * (y1 - y0) / (x1 - x0);
+  svg.setAttribute("viewBox", `0 0 ${W} ${H.toFixed(1)}`);
+  const sx = x => (x - x0) / (x1 - x0) * W, sy = y => H - (y - y0) / (y1 - y0) * H, sc = W / (x1 - x0);
+  const path = pts => "M" + pts.map(p => sx(p[0]).toFixed(1) + " " + sy(p[1]).toFixed(1)).join("L") + "Z";
+  el("path", { d: path(outer) + path(inner), fill: "var(--tarmac)", "fill-rule": "evenodd", stroke: "none" }, svg);
+  el("path", { d: path(outer), fill: "none", stroke: "var(--edge)", "stroke-width": 1.2 }, svg);
+  el("path", { d: path(inner), fill: "none", stroke: "var(--edge)", "stroke-width": 1.2 }, svg);
+  for (const [k, t] of karts)          // each driver's whole line, faint
+    el("path", { d: "M" + t.x.map((x, i) => sx(x).toFixed(1) + " " + sy(t.y[i]).toFixed(1)).join("L"), fill: "none",
+      stroke: DRV[k].c, "stroke-width": 1.2, "stroke-opacity": 0.45, "stroke-linejoin": "round" }, svg);
+  el("circle", { cx: sx(0), cy: sy(0), r: 4, fill: "var(--ink)", stroke: "var(--surface)", "stroke-width": 2 }, svg);
+
+  // heading at every logged point (from the movement around it; held while standing still)
+  for (const [, t] of karts) {
+    t.h = []; let last = 0;
+    for (let i = 0; i < t.x.length; i++) {
+      const a = Math.max(0, i - 1), b = Math.min(t.x.length - 1, i + 1);
+      const dx = t.x[b] - t.x[a], dy = t.y[b] - t.y[a];
+      if (Math.hypot(dx, dy) > 0.05) last = Math.atan2(dy, dx);
+      t.h.push(last);
+    }
+    let first = t.h.find((h, i) => Math.hypot(t.x[Math.min(i + 1, t.x.length - 1)] - t.x[i], t.y[Math.min(i + 1, t.y.length - 1)] - t.y[i]) > 0.05);
+    for (let i = 0; i < t.h.length && Math.hypot(t.x[Math.min(i + 1, t.x.length - 1)] - t.x[i], t.y[Math.min(i + 1, t.y.length - 1)] - t.y[i]) <= 0.05; i++) t.h[i] = first ?? 0;
+  }
+  const at = (t, time) => {            // state at a time, interpolated between logged points
+    const T = t.t, n = T.length;
+    if (time >= T[n - 1]) return { x: t.x[n - 1], y: t.y[n - 1], d: t.d[n - 1], v: t.v[n - 1], h: t.h[n - 1], i: n - 1 };
+    let lo = 0, hi = n - 1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (T[m] <= time) lo = m; else hi = m; }
+    const f = Math.max(0, Math.min(1, (time - T[lo]) / ((T[hi] - T[lo]) || 1)));
+    const L = (a, b) => a + (b - a) * f;
+    let dh = t.h[hi] - t.h[lo]; dh = (dh + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
+    return { x: L(t.x[lo], t.x[hi]), y: L(t.y[lo], t.y[hi]), d: L(t.d[lo], t.d[hi]), v: L(t.v[lo], t.v[hi]), h: t.h[lo] + dh * f, i: lo };
+  };
+  const timeAtDist = (t, d) => {       // when this driver reached a distance along the lap
+    if (d >= t.d[t.d.length - 1]) return t.lap;
+    let i = 0; while (i < t.d.length - 1 && t.d[i + 1] < d) i++;
+    const f = (d - t.d[i]) / ((t.d[i + 1] - t.d[i]) || 1);
+    return t.t[i] + (t.t[i + 1] - t.t[i]) * Math.max(0, Math.min(1, f));
+  };
+
+  // karts: a box pointing along the heading (kart size, enlarged so it stays visible), with a 2 s trail
+  const len = Math.max(1.9 * sc, 15), wid = Math.max(D.kart_width * sc, 9);
+  const draw = karts.map(([k]) => ({
+    trail: el("path", { fill: "none", stroke: DRV[k].c, "stroke-width": Math.max(D.kart_width * sc, 4), "stroke-opacity": 0.5,
+      "stroke-linecap": "round", "stroke-linejoin": "round" }, svg),
+    body: el("rect", { x: -len / 2, y: -wid / 2, width: len, height: wid, rx: wid * 0.25, fill: DRV[k].c,
+      stroke: "var(--surface)", "stroke-width": 1 }, svg),
+  }));
+  const end = Math.max(tm.lap, tb.lap) + 1.0;
+  const scrub = document.getElementById("rpScrub"), read = document.getElementById("rpRead");
+  const playBtn = document.getElementById("rpPlay");
+  let now = 0, speed = 1, playing = false, lastTs = null;
+
+  function render() {
+    karts.forEach(([k, t], j) => {
+      const s = at(t, Math.min(now, t.lap)), g = draw[j];
+      g.body.setAttribute("transform", `translate(${sx(s.x).toFixed(2)} ${sy(s.y).toFixed(2)}) rotate(${(-s.h * 180 / Math.PI).toFixed(1)})`);
+      const pts = [], t0 = Math.max(0, Math.min(now, t.lap) - 2);
+      for (let i = 0; i < t.t.length && t.t[i] <= Math.min(now, t.lap); i++) if (t.t[i] >= t0) pts.push(sx(t.x[i]).toFixed(1) + " " + sy(t.y[i]).toFixed(1));
+      pts.push(sx(s.x).toFixed(1) + " " + sy(s.y).toFixed(1));
+      g.trail.setAttribute("d", pts.length > 1 ? "M" + pts.join("L") : "");
+    });
+    const sm = at(tm, Math.min(now, tm.lap)), sb = at(tb, Math.min(now, tb.lap));
+    const row = (k, t, s) => `<span><i class="sw ${kindOf(k)}"></i>${k}</span><span>${now >= t.lap ? "finished " + t.lap.toFixed(2) + " s" : s.d.toFixed(0) + " m · " + s.v.toFixed(1) + " m/s"}</span>`;
+    let gap;
+    if (now >= tm.lap && now >= tb.lap) gap = `${kM} won by ${(tb.lap - tm.lap).toFixed(2)} s`;
+    else if (now >= tm.lap) gap = `${kM} finished; B is ${(tb.lap - tm.lap).toFixed(2)} s behind`;
+    else { const g = timeAtDist(tb, sm.d) - Math.min(now, tm.lap); gap = Math.abs(g) < 0.05 ? "level" : g > 0 ? `B is ${g.toFixed(2)} s behind` : `B is ${(-g).toFixed(2)} s ahead`; }
+    read.innerHTML = `<span>Time</span><span>${Math.min(now, end - 1).toFixed(1)} s</span>` + row(kM, tm, sm) + row(kB, tb, sb) + `<span>Gap</span><span>${gap}</span>`;
+    scrub.value = Math.round(now / end * 1000);
+  }
+  function frame(ts) {
+    if (!playing) { lastTs = null; return; }
+    if (lastTs != null) now = Math.min(end, now + (ts - lastTs) / 1000 * speed);
+    lastTs = ts;
+    render();
+    if (now >= end) { setPlaying(false); playBtn.textContent = "Play again"; return; }
+    requestAnimationFrame(frame);
+  }
+  function setPlaying(p) {
+    playing = p; playBtn.setAttribute("aria-pressed", p); playBtn.textContent = p ? "Pause" : "Play";
+    if (p) requestAnimationFrame(frame);
+  }
+  playBtn.addEventListener("click", () => { if (!playing && now >= end) now = 0; setPlaying(!playing); });
+  document.getElementById("rpRestart").addEventListener("click", () => { now = 0; render(); });
+  document.querySelectorAll("#rpSpeed button").forEach(b => b.addEventListener("click", () => {
+    speed = +b.dataset.s;
+    document.querySelectorAll("#rpSpeed button").forEach(o => o.setAttribute("aria-pressed", o === b));
+  }));
+  scrub.addEventListener("input", () => { now = scrub.value / 1000 * end; render(); });
+  render();
+})();
+
+/* ---------- caveats */
+document.getElementById("caveats").innerHTML = [
+  `<strong>GPU sim, not the CPU seeds.</strong> These laps come from the GPU copy of the sim. In checks against the CPU (reference) sim it matched lap times and position error, and finished about 4 more laps in 100 at harsh noise, so harsh results here are a little kind.`,
+  `<strong>Same laps for everyone.</strong> Lap <i>j</i> has the same randomised kart (grip, mass, motor, brakes, steering), sensor errors and GPS episodes for every driver, which is why "vs B, same laps" is a fair comparison.`,
+  `<strong>Driver A's rare spins are real.</strong> On low-grip karts A occasionally spins out of the tightest hairpin under power (about 0.5% of realistic laps); B and the learned drivers carry less speed there.`,
+  `<strong>The GPU-trained top 5 are near copies.</strong> The learning rate decays to zero at the end of the run, so the last checkpoints barely differ; any of them stands for the run.`,
+  `<strong>Screening first.</strong> Every checkpoint drove ${D.stage1.laps.realistic} realistic and ${D.stage1.laps.harsh} harsh laps; only the shortlist drove the full ${S2.laps.toLocaleString("en-US")} laps per level, so a checkpoint just outside the shortlist may be about as good.`,
+  `<strong>Final word on the CPU.</strong> Before any model goes on the kart, benchmark it on the CPU reference sim (seeds 0–29), like the drivers on the CPU benchmark page.`,
+].map(x => `<li>${x}</li>`).join("");
+
+/* ---------- full-screen button on every chart / map panel: the browser's full screen where the
+   viewer allows it, otherwise the panel fills the window. Esc or the button again closes it. */
+(function fullScreen() {
+  const ICON_OPEN = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
+  const ICON_CLOSE = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 2v4H2M14 6h-4V2M10 14v-4h4M2 10h4v4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
+  let open = null;
+  function close() {
+    if (!open) return;
+    const p = open; open = null;
+    p.classList.remove("full"); document.body.classList.remove("has-full");
+    const b = p.querySelector(":scope > .fsbtn"); b.innerHTML = ICON_OPEN; b.setAttribute("aria-label", "Show full screen");
+    if (document.fullscreenElement === p) document.exitFullscreen().catch(() => {});
+    p.querySelectorAll(".tip").forEach(t => t.hidden = true);
+  }
+  function show(p) {
+    close();
+    open = p; p.classList.add("full"); document.body.classList.add("has-full");
+    const b = p.querySelector(":scope > .fsbtn"); b.innerHTML = ICON_CLOSE; b.setAttribute("aria-label", "Exit full screen");
+    try { const r = p.requestFullscreen && p.requestFullscreen(); if (r && r.catch) r.catch(() => {}); } catch (e) {}
+  }
+  document.querySelectorAll(".panel").forEach(p => {
+    if (!p.querySelector("svg[role=img]")) return;
+    const b = document.createElement("button");
+    b.className = "fsbtn"; b.type = "button"; b.innerHTML = ICON_OPEN; b.setAttribute("aria-label", "Show full screen"); b.title = "Full screen";
+    b.addEventListener("click", () => open === p ? close() : show(p));
+    p.appendChild(b);
+  });
+  document.addEventListener("keydown", ev => { if (ev.key === "Escape") close(); });
+  document.addEventListener("fullscreenchange", () => { if (open && !document.fullscreenElement) close(); });
+})();
+</script>

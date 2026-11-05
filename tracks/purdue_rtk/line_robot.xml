@@ -1,0 +1,149 @@
+<!--
+  line_robot.xml -- the line-following kart with three cameras.
+  Pulled into a world with <include file="line_robot.xml"/> (see track_world.xml).
+
+  Sized like the Top Kart USA MSTEM3 E1 electric kart chassis (Purdue evGrand
+  Prix). Published specs: 1040 mm wheelbase, 30 mm frame tubing, 50 mm rear
+  axle, magnesium 130/210 mm wide wheels. The rest are typical kart numbers:
+  front tyres 10x4.50-5 (0.255 m dia), rear 11x7.10-5 (0.28 m dia), ~1.8 m
+  long, ~1.4 m wide over the rear tyres.
+
+  AKS rulebook (rules.autonomouskartingseries.com, Jan 2026 rev):
+    - tyres: front 10x4.50-5, rear 11x7.10-5 (matches the wheels below)
+    - weight: minimum 275 lb with everything on; suggested 300+ lb with
+      43/57 front/rear. This model is ~136 kg (300 lb), ~43/57.
+    - drivetrain: rear-wheel drive only, at most 15 kW. The bridge caps the
+      drive motor at 15 kW (native/track_ros_bridge.py, MOTOR_POWER).
+
+  Wheels -- the same layout as the real kart:
+    - SOLID REAR AXLE: both rear wheels are on one shaft, driven by one motor.
+      Actuator "drive_motor" takes the axle speed in rad/s.
+    - STEERED FRONT WHEELS: each front wheel turns on its own kingpin
+      ("left_steer_joint" / "right_steer_joint", +-30 deg) and spins freely.
+      Actuators "steer_left" / "steer_right" take a steering angle in radians;
+      the bridge (native/track_ros_bridge.py) sets them with Ackermann geometry
+      so the inner wheel turns more than the outer one.
+    - the body origin sits on the rear axle, 0.14 m above the ground
+
+  Cameras (320x240 grayscale in the sim, 60 deg vertical field of view).
+  They MUST match the CAMERAS table in src/robot_core/line_follower.py:
+      front_cam  x=1.40 y= 0.00 z=0.80  on a mast at the nose, straight ahead,
+                                        tilted 25 deg down
+      left_cam   x=1.30 y=+0.45 z=0.70  on a post at the front-left corner,
+                                        points 70 deg left, tilted 30 deg down
+      right_cam  x=1.30 y=-0.45 z=0.70  on a post at the front-right corner,
+                                        points 70 deg right, tilted 30 deg down
+  (z above is height above the ground; in the body frame below it is 0.14 less.
+   xyaxes = camera's right and up directions, worked out from those angles.)
+-->
+<mujoco model="line_robot">
+  <asset>
+    <material name="lr_body" rgba="0.15 0.40 0.85 1"/>
+    <material name="lr_frame" rgba="0.75 0.75 0.78 1"/>
+    <material name="lr_dark" rgba="0.10 0.10 0.10 1"/>
+    <material name="lr_wheel" rgba="0.12 0.12 0.12 1"/>
+    <material name="lr_hub" rgba="0.55 0.55 0.58 1"/>
+  </asset>
+
+  <worldbody>
+    <body name="robot" pos="0 0 0.14">
+      <freejoint name="robot_free"/>
+
+      <!-- Chassis (no collision: only the tyres touch the ground) -->
+      <geom name="chassis" type="box" pos="0.50 0 -0.09" size="0.70 0.30 0.012" material="lr_body"
+            contype="0" conaffinity="0" mass="30"/>
+      <geom type="capsule" fromto="-0.20 0.33 -0.09  1.20 0.25 -0.09" size="0.015" material="lr_frame"
+            contype="0" conaffinity="0" mass="2"/>
+      <geom type="capsule" fromto="-0.20 -0.33 -0.09  1.20 -0.25 -0.09" size="0.015" material="lr_frame"
+            contype="0" conaffinity="0" mass="2"/>
+      <!-- Front cross tube carrying the kingpins -->
+      <geom type="capsule" fromto="1.04 0.48 -0.07  1.04 -0.48 -0.07" size="0.015" material="lr_frame"
+            contype="0" conaffinity="0" mass="1"/>
+      <!-- Battery boxes on either side, drive motor by the axle, electronics
+           (motor controller, Jetson, e-stop), seat, bumpers -->
+      <geom type="box" pos="0.45 0.42 -0.04" size="0.25 0.08 0.06" material="lr_dark"
+            contype="0" conaffinity="0" mass="26"/>
+      <geom type="box" pos="0.45 -0.42 -0.04" size="0.25 0.08 0.06" material="lr_dark"
+            contype="0" conaffinity="0" mass="26"/>
+      <geom name="motor" type="cylinder" pos="0.12 -0.25 -0.01" size="0.09 0.08" euler="90 0 0"
+            material="lr_hub" contype="0" conaffinity="0" mass="12"/>
+      <geom name="electronics" type="box" pos="0.40 0 -0.04" size="0.12 0.12 0.05" material="lr_dark"
+            contype="0" conaffinity="0" mass="9"/>
+      <geom type="box" pos="0.20 0 0.08" size="0.16 0.18 0.16" euler="0 -15 0" material="lr_dark"
+            contype="0" conaffinity="0" mass="3"/>
+      <geom type="box" pos="1.32 0 -0.06" size="0.07 0.47 0.04" material="lr_body"
+            contype="0" conaffinity="0" mass="6"/>
+      <geom type="capsule" fromto="-0.32 0.62 -0.04  -0.32 -0.62 -0.04" size="0.015" material="lr_frame"
+            contype="0" conaffinity="0" mass="2"/>
+      <!-- Steering column + wheel (visual only) -->
+      <geom type="capsule" fromto="0.95 0 -0.06  0.62 0 0.24" size="0.012" material="lr_frame"
+            contype="0" conaffinity="0" mass="0.5"/>
+      <geom type="cylinder" pos="0.62 0 0.24" size="0.14 0.012" euler="0 -48 0" material="lr_dark"
+            contype="0" conaffinity="0" mass="0.5"/>
+
+      <!-- Camera mounts: mast at the nose, posts on the two front corners -->
+      <geom name="mast" type="box" pos="1.37 0 0.30" size="0.015 0.015 0.36" material="lr_dark"
+            contype="0" conaffinity="0" mass="0.5"/>
+      <geom name="left_post" type="capsule" fromto="1.30 0.45 -0.06  1.30 0.45 0.54" size="0.015"
+            material="lr_dark" contype="0" conaffinity="0" mass="0.4"/>
+      <geom name="right_post" type="capsule" fromto="1.30 -0.45 -0.06  1.30 -0.45 0.54" size="0.015"
+            material="lr_dark" contype="0" conaffinity="0" mass="0.4"/>
+
+      <!-- Three cameras (+ little housings just behind them so you can see them) -->
+      <geom type="box" pos="1.385 0 0.66" size="0.012 0.03 0.015" material="lr_dark" contype="0" conaffinity="0" mass="0.01"/>
+      <camera name="front_cam" pos="1.40 0 0.66"      xyaxes="0 -1 0  0.4226 0 0.9063" fovy="60"/>
+
+      <geom type="box" pos="1.295 0.436 0.56" size="0.012 0.03 0.015" euler="0 0 70" material="lr_dark" contype="0" conaffinity="0" mass="0.01"/>
+      <camera name="left_cam"  pos="1.30 0.45 0.56"   xyaxes="0.9397 -0.3420 0  0.1710 0.4698 0.8660" fovy="60"/>
+
+      <geom type="box" pos="1.295 -0.436 0.56" size="0.012 0.03 0.015" euler="0 0 -70" material="lr_dark" contype="0" conaffinity="0" mass="0.01"/>
+      <camera name="right_cam" pos="1.30 -0.45 0.56"  xyaxes="-0.9397 -0.3420 0  0.1710 -0.4698 0.8660" fovy="60"/>
+
+      <!-- Steered front wheels (10x4.50-5): kingpin (z) -> free-spinning wheel (y) -->
+      <body name="left_knuckle" pos="1.04 0.53 -0.0125">
+        <joint name="left_steer_joint" type="hinge" axis="0 0 1" range="-30 30" damping="5" armature="0.02"/>
+        <geom type="capsule" fromto="0 -0.05 0  0 0 0" size="0.012" material="lr_frame" contype="0" conaffinity="0" mass="0.3"/>
+        <body name="front_left_wheel">
+          <joint name="front_left_spin" type="hinge" axis="0 1 0" damping="0.02"/>
+          <geom name="front_left_wheel_geom" type="cylinder" size="0.1275 0.057" euler="90 0 0"
+                material="lr_wheel" friction="1.2 0.005 0.0001" mass="2.0"/>
+          <geom type="cylinder" size="0.065 0.058" euler="90 0 0" material="lr_hub" contype="0" conaffinity="0" mass="0.01"/>
+        </body>
+      </body>
+      <body name="right_knuckle" pos="1.04 -0.53 -0.0125">
+        <joint name="right_steer_joint" type="hinge" axis="0 0 1" range="-30 30" damping="5" armature="0.02"/>
+        <geom type="capsule" fromto="0 0.05 0  0 0 0" size="0.012" material="lr_frame" contype="0" conaffinity="0" mass="0.3"/>
+        <body name="front_right_wheel">
+          <joint name="front_right_spin" type="hinge" axis="0 1 0" damping="0.02"/>
+          <geom name="front_right_wheel_geom" type="cylinder" size="0.1275 0.057" euler="90 0 0"
+                material="lr_wheel" friction="1.2 0.005 0.0001" mass="2.0"/>
+          <geom type="cylinder" size="0.065 0.058" euler="90 0 0" material="lr_hub" contype="0" conaffinity="0" mass="0.01"/>
+        </body>
+      </body>
+
+      <!-- Solid rear axle (50 mm) with both driven wheels (11x7.10-5) on it -->
+      <body name="rear_axle">
+        <joint name="rear_axle_joint" type="hinge" axis="0 1 0" damping="0.1"/>
+        <geom type="capsule" fromto="0 0.62 0  0 -0.62 0" size="0.025" material="lr_frame"
+              contype="0" conaffinity="0" mass="4"/>
+        <geom name="rear_left_wheel_geom" type="cylinder" pos="0 0.61 0" size="0.14 0.09" euler="90 0 0"
+              material="lr_wheel" friction="1.2 0.005 0.0001" mass="3.0"/>
+        <geom name="rear_right_wheel_geom" type="cylinder" pos="0 -0.61 0" size="0.14 0.09" euler="90 0 0"
+              material="lr_wheel" friction="1.2 0.005 0.0001" mass="3.0"/>
+        <geom type="cylinder" pos="0 0.61 0" size="0.07 0.091" euler="90 0 0" material="lr_hub" contype="0" conaffinity="0" mass="0.01"/>
+        <geom type="cylinder" pos="0 -0.61 0" size="0.07 0.091" euler="90 0 0" material="lr_hub" contype="0" conaffinity="0" mass="0.01"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <!-- Rear axle speed controller: ctrl = target axle speed in rad/s.
+         100 rad/s = 14 m/s (31 mph) top speed; 250 N m peak axle torque. The
+         bridge lowers forcerange as the axle speeds up so the motor never puts
+         out more than the 15 kW AKS limit. -->
+    <velocity name="drive_motor" joint="rear_axle_joint" kv="80" ctrlrange="-100 100" forcerange="-250 250"/>
+    <!-- Steering servos: ctrl = target steering angle in radians (+ = left) -->
+    <position name="steer_left"  joint="left_steer_joint"  kp="400" ctrlrange="-0.5236 0.5236" forcerange="-100 100"/>
+    <position name="steer_right" joint="right_steer_joint" kp="400" ctrlrange="-0.5236 0.5236" forcerange="-100 100"/>
+  </actuator>
+</mujoco>

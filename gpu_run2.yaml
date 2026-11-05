@@ -1,0 +1,20 @@
+# GPU run 2 (scripts/gpu/train.py --config gpu_run2.yaml): run 1's settings (gpu.yaml) with
+# more learning per batch and a learning rate that adapts instead of decaying to 0.
+# Run 1 spent 2.3 s driving and 0.26 s learning per update, with tiny policy changes (KL ~0.003).
+
+envs: 4096
+steps: 200_000_000
+ckpt_every: 2_000_000      # ~100 checkpoints, so screening them takes as long as run 1's
+curriculum_at: 1_000_000
+ramp: 1_000_000
+seed: 1
+
+ppo:
+  n_steps: 32
+  minibatches: 16          # 8k samples per gradient step (run 1: 8 x 16k)
+  n_epochs: 10             # (run 1: 5) -> 160 gradient steps per update instead of 40
+  learning_rate: 0.0003    # start; then adaptive
+  lr_schedule: adaptive    # x1.5 / /1.5 after each gradient step to hold KL near desired_kl (rsl_rl)
+  desired_kl: 0.01
+  lr_min: 0.00001
+  lr_max: 0.001
