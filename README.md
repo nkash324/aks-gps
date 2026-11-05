@@ -34,24 +34,71 @@ G2 is about 3 s a lap faster than the best tuned B, on every lap both finished. 
 checkpoint is `runs/gpu/20261029-234306-run2/ckpt/460062720/` (`model.zip` +
 `vecnormalize.pkl`, Stable-Baselines3 format).
 
-## How it works
+## What the code does
 
-1. **Map and racing line:** the track edges come from a 2021 RTK survey. Before driving,
-   `planner.py` computes the smoothest line with 0.30 m to spare from each edge, and a
-   speed plan along it.
-2. **Where am I:** an EKF blends RTK GPS (20 Hz, 50 ms late), IMU and wheel speed into
-   position, heading and speed. Drivers never see the true position.
-3. **Driver:** 20 times a second the driver outputs a target speed and a curvature.
-   - **A:** pure pursuit on the centreline, cautious.
-   - **B:** pure pursuit on the racing line.
-   - **G2 (learned):** B plus a capped correction from a 45-input network
-     (45 → 128 → 128 → 2, tanh): up to ±1 m/s and ±0.02 1/m.
-4. **Low-level control** turns that into motor, brake and steering at 100 Hz.
-5. **Training:** every lap gets a randomised kart (grip, mass, motor, brakes, steering)
-   and sensor errors at three levels (perfect, realistic, harsh). The GPU sim runs 4,096
-   karts at once; G2 trained for 460M steps.
+**1. The track: `tracks/purdue_rtk/`, `kart_gps/track.py`**
+The track edges, built from the 2021 RTK survey, as a MuJoCo world. `track.py` reads them
+and answers: how far around the lap is this point, how far off the centreline, how much
+room to each edge, has the kart left the track? Plain numpy, so it can run on the kart.
 
-## Layout
+**2. The kart: `kart_gps/kart.py`, `mj_kart.py`, `aks_kart.xml`**
+- `kart.py`: a fast 2D kart model with mass, tyre grip (sliding gradually at the limit),
+  weight shift under braking and cornering, steering speed and delay, motor and regen
+  limits, and the hydraulic brake. Used for all training and benchmarks.
+- `mj_kart.py`: the same kart as a 3D MuJoCo body, for cross-checks and watching laps.
+- Every lap randomises the kart (grip, mass, motor, brakes, steering), because the real
+  kart's numbers are still estimates.
+
+**3. Sensors and "where am I": `kart_gps/sensors.py`, `estimator.py`**
+- `sensors.py` simulates RTK GPS (20 Hz, 50 ms late, centimetre noise, occasional drops to
+  "float" and short dropouts), the IMU (noise, bias) and the wheel encoder (noise, tyre
+  size error), at three levels: perfect, realistic, harsh.
+- `estimator.py` is the EKF. It blends those sensors into the kart's best estimate of
+  position, heading and speed (the **pose**) that every driver uses.
+
+**4. The plan: `kart_gps/planner.py`**
+Before driving, it computes the racing line (the smoothest path, at least 0.30 m inside
+the edges) and a speed plan (how fast at each point, from cornering and braking limits).
+
+**5. The drivers: `kart_gps/drivers.py`, `control.py`, `rl_env.py`**
+- **Driver A:** pure pursuit along the centreline, slow and safe.
+- **Driver B:** pure pursuit along the racing line.
+- **G2 (learned):** driver B plus a small neural network's correction to speed and turning
+  (45 inputs → 128 → 128 → 2 outputs, capped at ±1 m/s and ±0.02 1/m). `rl_env.py`
+  builds its 45 inputs.
+- `control.py`: the low-level controller that turns "go this fast, turn this much" into
+  motor, brake and steering commands.
+
+**6. Training: `kart_gpu/`, `scripts/gpu/train.py`, `scripts/gps/train_residual.py`**
+`kart_gpu/` is the whole simulator rewritten to run 4,096 karts at once on a GPU, plus a
+PPO trainer that writes standard Stable-Baselines3 checkpoints. The best result, G2 460.1M,
+is in `runs/gpu/20261029-234306-run2/ckpt/460062720/`.
+
+**7. Testing and viewing: `scripts/gps/`, `scripts/gpu/`, `tests/`**
+- Benchmarks where every driver drives the same laps (same kart, same sensor errors).
+- Checkpoint screening, and `tune_b.py`, which finds driver B's best settings for a fair
+  comparison.
+- Kart spec checks (acceleration, braking, steering, skidpad) on both physics models.
+- `play_mujoco.py`: watch G2 in the MuJoCo viewer, with A and B as see-through karts.
+- HTML results pages, and 22 automated tests.
+
+### One lap, end to end
+
+```
+map -> racing line + speed plan            (once, before driving)
+every 10 ms:  sensors (noisy) -> EKF -> pose
+every 50 ms:  driver (A, B or G2) -> target speed + turn
+every 10 ms:  low-level control -> motor / brake / steering -> kart physics -> next step
+```
+
+### Not in this repository yet
+
+- No ROS: a ROS 2 / Docker version of this loop exists separately.
+- No camera input.
+- No connection to real hardware.
+- The kart numbers are estimates until the built kart is measured.
+
+## File layout
 
 ```
 gps.yaml               sim, sensors, planner, drivers, reward, network
