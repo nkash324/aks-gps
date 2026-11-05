@@ -16,9 +16,6 @@ page if others need access):
 | [AKS Kart Driver Briefing](https://claude.ai/artifact/43FYGY8i3wHb8Z3XZ95Xxo) | Short team briefing: the result, lap replay at three sensor levels, how the network and PPO work, open questions |
 | [AKS Kart Driver Overview](https://claude.ai/artifact/4ubgBm4Nxo1gXu8SWnNHVt) | Full technical write-up: track, kart model, sensors, EKF, planner, training, physics checks |
 | [Purdue Kart GPU Run 2 at 500M](https://claude.ai/artifact/CJkfqUACmtU8NtWsaADRRQ) | Benchmark of the final training run (G2 460.1M) against drivers A and B |
-| [Purdue Kart GPU Run 2](https://claude.ai/artifact/U13Py7R1zoukYqdwUP8KkE) | Run 2 to 200M steps and the GPU fine-tune |
-| [Purdue Kart GPU Benchmark](https://claude.ai/artifact/PUCeUQ84i7JCiuGroVn3rD) | Every CPU- and GPU-trained checkpoint on the same 1,000 laps per sensor level |
-| [Purdue GPS Kart Benchmark](https://claude.ai/artifact/4EbxeYrVweeKQWkrGbkmny) | First CPU benchmark of drivers A and B |
 
 ## Results
 
