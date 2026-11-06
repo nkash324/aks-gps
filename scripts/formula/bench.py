@@ -5,6 +5,8 @@ Laps depend only on (seed, number of karts, sensor levels), so run every driver 
 same --per-level and they all drive identical laps (scripts/formula/check_laps.py). The
 result goes to <out>/bench_<driver>_<per-level>.json (summary + compact per-lap rows).
 
+ablations: c_mincurv (C's steering + speed limits on the min-curvature line), c_bplan (C on the mintime line
+with driver B's speed plan 6.1 / 5.0)
 drivers: g2 (460.1M checkpoint), b (published), btuned (6.1 / 5.0 / 0.35), c (tuned formula
 driver, runs/formula/tune_c.json), mpc (runs/formula/tune_mpc.json), oracle (C with perfect
 knowledge of the lap's grip: --oracle-json)
@@ -60,7 +62,7 @@ def run_g2(cfg, track, base, lv, seed, log):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--driver", required=True, choices=["g2", "b", "btuned", "c", "mpc", "oracle"])
+    ap.add_argument("--driver", required=True, choices=["g2", "b", "btuned", "c", "mpc", "oracle", "c_mincurv", "c_bplan"])
     ap.add_argument("--per-level", type=int, default=1000)
     ap.add_argument("--out", default=str(ROOT / "runs" / "formula"))
     ap.add_argument("--seed", type=int, default=BENCH_SEED)
@@ -85,13 +87,20 @@ def main():
         if a.driver == "btuned":
             patch_b(sim, [(6.1, 5.0, 0.35)], N, base, cfg)
         res = run_laps(sim, est, sim.drive_b, progress=log)
-    elif a.driver in ("c", "oracle"):
+    elif a.driver in ("c", "oracle", "c_mincurv", "c_bplan"):
         line = load_mintime(cfg)
         sim, est = make_sim(cfg, track, base, N, a.seed, lv)
         cand = winner(a.c_json)
         knobs = {k: cand[k] for k in ("tau", "us", "w_space", "w_time", "zeta", "preview")}
         if a.driver == "c":
             drv = BatchFormula(sim, line, plan_table(line, cfg, cand["lat"], cand["brake"]), **knobs)
+        elif a.driver == "c_mincurv":
+            drv = BatchFormula(sim, base, plan_table(base, cfg, cand["lat"], cand["brake"]), **knobs)
+        elif a.driver == "c_bplan":
+            from kart_gps.planner import Line, speed_plan
+            pl = cfg["planner"]
+            ln = Line(line.pts, "mintime")
+            drv = BatchFormula(sim, line, speed_plan(ln, cfg["kart"], 6.1, 5.0, pl["top_speed"]), **knobs)
         else:
             o = json.load(open(a.oracle_json))["winner"]
             mu = sim.s["P_mu"].cpu().numpy()

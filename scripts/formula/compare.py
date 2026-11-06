@@ -15,9 +15,10 @@ import numpy as np
 
 from common import LEVELS, ROOT, bootstrap_ci
 
-ORDER = ["g2", "b", "btuned", "c", "mpc", "oracle"]
+ORDER = ["g2", "b", "btuned", "c", "mpc", "oracle", "c_mincurv", "c_bplan"]
 NAMES = {"g2": "G2 460.1M (learned)", "b": "B (published)", "btuned": "B tuned", "c": "C tuned (formula)",
-         "mpc": "MPC tuned", "oracle": "Oracle C (true grip)"}
+         "mpc": "MPC tuned", "oracle": "Oracle C (true grip)",
+         "c_mincurv": "(ablation) C on the min-curvature line", "c_bplan": "(ablation) C with B's speed plan"}
 
 
 def main():
