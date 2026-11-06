@@ -66,12 +66,20 @@ def centreline(track, step=0.5):
     return Line(track.pts[idx], "centreline")
 
 
-def min_curvature_line(track, kart, buffer=0.3, step=0.5, iters=5000):
-    """Minimum-curvature line inside the edges, with `buffer` m between the tyres and edges."""
+def track_bounds(track, kart, buffer=0.3, step=0.5):
+    """Centreline samples and how far a line may sit from them.
+    -> (C (n, 2) centreline points, N (n, 2) left normals, lo (n,), hi (n,)) where lo / hi
+    are the sideways offset bounds (left +) that keep every tyre `buffer` m inside the edges."""
     idx = np.arange(0, track.n, max(1, int(round(step / (track.length / track.n)))))
     C, N = track.pts[idx], track.normal[idx]
     hw = kart_half_width(kart) + buffer
     lo, hi = -(track.hw_right[idx] - hw), track.hw_left[idx] - hw
+    return C, N, lo, hi
+
+
+def min_curvature_line(track, kart, buffer=0.3, step=0.5, iters=5000):
+    """Minimum-curvature line inside the edges, with `buffer` m between the tyres and edges."""
+    C, N, lo, hi = track_bounds(track, kart, buffer, step)
     n = len(C)
     # second difference of the points = curvature * ds^2 (spacing is even):
     #   p[i-1] - 2 p[i] + p[i+1],  p = C + offset * N  -> linear in the offsets
@@ -133,3 +141,141 @@ def speed_plan(line, kart, lat_accel, brake_decel, top_speed, passes=2):
     line.speed = v
     line.lap_estimate = float(np.sum(ds / np.maximum(v, 0.1)))
     return v
+
+
+# ---------------------------------------------------------------------------------------
+# Physics-based speed plan and the minimum-time line (the "formula" drivers C and MPC)
+# ---------------------------------------------------------------------------------------
+AIR = 1.2
+
+# Starting values from scripts/gps/kart_checks.py on the 2D model: skidpad 1.15 g (11.3 m/s^2)
+# and peak braking 4.81 m/s^2 (regen + hydraulic), each scaled by a margin for the
+# per-lap randomisation (grip +-15 %, ...) and tracking errors.
+GGV_DEFAULTS = {"lat": 0.65 * 11.3, "brake": 0.8 * 4.81, "top_speed": 11.5, "p": 2.0}
+
+
+def speed_plan_ggv(line, kart, lat=None, brake=None, top_speed=None, p=None, passes=2,
+                   hydraulic=1.0, store=True):
+    """Speed plan from a simple point-mass model of the nominal kart (a 'GGV' diagram).
+
+    - Friction ellipse: with lateral acceleration a_y = v^2 |curvature| the share of the
+      longitudinal limit that is left is (1 - (a_y / lat)^p)^(1/p). p = 2 is the
+      friction circle; p > 2 is a squarer diagram (corner and brake at the same time).
+    - Accelerating: motor force (drive_force, fading over the last top_speed_taper m/s
+      below the motor limit) minus rolling resistance and drag, times the ellipse share.
+    - Braking: min(brake, (regen + hydraulic) / mass), where regen = min(regen_force,
+      regen_power / v) and hydraulic = `hydraulic` x brake_force; times the ellipse share,
+      plus the resistance that helps slow the kart.
+    - Cornering speed: sqrt(lat / |curvature|), capped at top_speed.
+    - Forward and backward passes round the closed loop, `passes` times.
+
+    lat, brake in m/s^2 (the tunable limits; defaults GGV_DEFAULTS). Returns the speed (m/s) at
+    every line point; with store=True also sets line.speed and line.lap_estimate (s).
+    """
+    d = GGV_DEFAULTS
+    lat = d["lat"] if lat is None else lat
+    brake = d["brake"] if brake is None else brake
+    top_speed = d["top_speed"] if top_speed is None else top_speed
+    p = d["p"] if p is None else p
+    m = kart["mass"]
+    kappa = np.abs(line.curvature)
+    v_corner = np.minimum(top_speed, np.sqrt(lat / np.maximum(kappa, 1e-6)))
+    ds = np.diff(np.r_[line.s, line.length])
+    n = line.n
+    f_drive, v_top, taper = kart["drive_force"], kart["top_speed"], kart["top_speed_taper"]
+    roll = kart["rolling_resistance"] * m * G
+    cda = 0.5 * AIR * kart["drag_area"]
+    ip = 1.0 / p
+
+    def share(v, k):
+        r = min(1.0, v * v * k / lat)
+        return (1.0 - r ** p) ** ip
+
+    def accel_max(v, k):
+        f = f_drive * min(1.0, max(0.0, (v_top - v) / taper))
+        return (f - roll - cda * v * v) / m * share(v, k)
+
+    def decel_max(v, k):
+        f = min(kart["regen_force"], kart["regen_power"] / max(v, 0.5)) + hydraulic * kart["brake_force"]
+        return min(brake, f / m) * share(v, k) + (roll + cda * v * v) / m
+
+    v = v_corner.copy()
+    for _ in range(passes):
+        for i in range(n):
+            j = (i + 1) % n
+            v[j] = min(v[j], math.sqrt(v[i] ** 2 + 2 * max(accel_max(v[i], kappa[i]), 0.0) * ds[i]))
+        for i in range(n - 1, -1, -1):
+            j = (i + 1) % n
+            v[i] = min(v[i], math.sqrt(v[j] ** 2 + 2 * decel_max(v[j], kappa[j]) * ds[i]))
+    if store:
+        line.speed = v
+        line.lap_estimate = float(np.sum(ds / np.maximum(v, 0.1)))
+    return v
+
+
+def bspline_basis(n, spacing_m, length):
+    """(n, nb) periodic cubic B-spline bumps, one every ~spacing_m metres along n samples."""
+    nb = max(8, int(round(length / spacing_m)))
+    h = n / nb
+    i = np.arange(n)[:, None]
+    c = np.arange(nb)[None, :] * h
+    d = np.abs(((i - c + n / 2) % n) - n / 2) / h
+    return np.where(d < 1, 2 / 3 - d ** 2 + d ** 3 / 2, np.where(d < 2, (2 - d) ** 3 / 6, 0.0))
+
+
+def mintime_line(track, kart, buffer=0.3, step=0.5, plan=None, spacing=5.0, sweeps=60,
+                 step0=0.4, min_step=0.02, z0=None, verbose=False):
+    """Minimum-time line: lowest lap time of the speed plan, inside the same edges.
+
+    Starts from the minimum-curvature offsets z0 and moves z = z0 + B w, B a periodic cubic
+    B-spline basis with a bump every `spacing` m. Pattern search on w: try +-step on each
+    weight, keep a move if it stays inside [lo, hi] and the planned lap time drops; when a
+    full sweep finds nothing the step halves, until it is below min_step.
+    plan: dict of speed_plan_ggv keywords (the limits the line is optimised for).
+    Returns a Line named 'mintime' (.offset, .lap_estimate set; speed plan stored).
+    """
+    plan = dict(plan or {})
+    C, N, lo, hi = track_bounds(track, kart, buffer, step)
+    if z0 is None:
+        z0 = min_curvature_line(track, kart, buffer, step).offset
+    z0 = np.clip(z0, lo, hi)
+    B = bspline_basis(len(C), spacing, float(np.sum(np.linalg.norm(np.roll(C, -1, 0) - C, axis=1))))
+    nb = B.shape[1]
+
+    def make(z):
+        return Line(C + z[:, None] * N, "mintime")
+
+    def cost(z):
+        ln = make(z)
+        speed_plan_ggv(ln, kart, store=True, **plan)
+        return ln.lap_estimate
+
+    w = np.zeros(nb)
+    best = cost(z0)
+    t_start = best
+    st = step0
+    rng = np.random.default_rng(0)
+    while st >= min_step and sweeps > 0:
+        improved = False
+        sweeps -= 1
+        for j in rng.permutation(nb):
+            for sgn in (1.0, -1.0):
+                w2 = w.copy()
+                w2[j] += sgn * st
+                z = z0 + B @ w2
+                if np.any(z < lo) or np.any(z > hi):
+                    continue
+                c = cost(z)
+                if c < best - 1e-6:
+                    best, w, improved = c, w2, True
+                    break
+        if verbose:
+            print(f"  step {st:.3f} m: planned lap {best:.3f} s (start {t_start:.3f})", flush=True)
+        if not improved:
+            st /= 2
+    z = z0 + B @ w
+    line = make(z)
+    speed_plan_ggv(line, kart, **plan)
+    line.offset = z
+    line.lap_estimate_start = t_start
+    return line
