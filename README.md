@@ -27,6 +27,12 @@ Mean lap on the same 1,000 simulated laps per driver, realistic sensor errors:
 | B: racing-line pure pursuit, best tuned settings (6.1 / 5.0 / 0.35) | 46.15 s | 99.0% |
 | **G2 460.1M: B + learned correction** | **43.46 s** | **99.3%** |
 
+**Non-ML baselines (branch `formula-drivers`, CPU re-run of all drivers on the same new laps, 1,000 per level):**
+a tuned "formula" driver C (feed-forward + feedback steering on a minimum-time line, friction-ellipse
+speed plan) matches G2: realistic 43.51 s / 99.6% vs 43.49 s / 99.7%, and finishes more harsh laps
+(91.6% vs 87.5%). A batched MPC driver is slightly slower and less robust (43.85 s / 97.9%). An
+oracle C that knows each lap's true grip reaches 42.45 s. Details: [notes/formula_results.md](notes/formula_results.md).
+
 G2 is about 2.7 s a lap faster than the best tuned B (median), on every lap both finished. The best
 checkpoint is `runs/gpu/20261029-234306-run2/ckpt/460062720/` (`model.zip` +
 `vecnormalize.pkl`, Stable-Baselines3 format).
@@ -107,16 +113,19 @@ kart_gps/              CPU reference stack
   mj_kart.py, aks_kart.xml   the same kart in MuJoCo (3D cross-check and viewer)
   sensors.py             RTK GNSS, IMU, wheel encoder with noise, delay, dropouts
   estimator.py           EKF: position, heading, speed, IMU biases
-  planner.py             minimum-curvature racing line and speed plan
+  planner.py             minimum-curvature racing line and speed plan; GGV speed plan and minimum-time line
   control.py             low-level speed / steering control
-  drivers.py             drivers A and B (pure pursuit)
+  drivers.py             drivers A and B (pure pursuit) and C (formula: feed-forward + feedback on the mintime line)
   env.py, rl_env.py      lap environment and the residual-RL environment
 kart_gpu/              the same stack as batched PyTorch on the GPU
   sim.py, residual.py    thousands of karts at once
+  formula.py, mpc.py     batched driver C and the MPC driver (any device)
   ppo.py                 PPO with an adaptive learning rate (SB3-compatible checkpoints)
 scripts/gps/           CPU: benchmark, training, evaluation, kart checks, MuJoCo viewer
 scripts/gpu/           GPU: training, checkpoint screening and benchmark, sim check, tuning of B
+scripts/formula/       formula drivers: build_line, tune_c, tune_mpc, tune_oracle, bench, compare, check_laps
 scripts/build_purdue_track.py   rebuild tracks/purdue_rtk from the survey files
+runs/formula/          mintime line cache, tuned settings, benchmark summaries and per-lap rows (small JSON)
 runs/gpu/20261029-234306-run2/ckpt/460062720/   best model, G2 460.1M (SB3 model.zip + vecnormalize.pkl)
 tests/                 pytest: track, kart, planner, envs, GPU PPO vs Stable-Baselines3
 notes/open_questions.md  questions for the organisers and the team
@@ -141,6 +150,7 @@ python scripts/gpu/train.py --config gpu_run2.yaml --name run2     # GPU trainin
 python scripts/gpu/bench_all.py --run "G:GPU run 2:runs/gpu/<run>"  # screen + benchmark checkpoints
 python scripts/gpu/results_page.py              # benchmark -> HTML results page
 python scripts/gpu/tune_b.py                    # give driver B its best settings, then compare
+python scripts/formula/bench.py --driver c      # formula driver C / mpc / oracle / g2 / b on the benchmark laps (CPU ok)
 ```
 
 ## Notes
