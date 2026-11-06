@@ -109,3 +109,39 @@ def bootstrap_ci(x, n=5000, seed=0):
     rng = np.random.default_rng(seed)
     m = np.array([x[rng.integers(0, len(x), len(x))].mean() for _ in range(n)])
     return float(np.percentile(m, 2.5)), float(np.percentile(m, 97.5))
+
+
+def load_mintime(cfg, path=None, plan=None):
+    """The cached minimum-time Line (pts from build_line.py) with a GGV speed plan."""
+    from kart_gps.planner import Line, speed_plan_ggv
+    z = np.load(path or ROOT / "runs" / "formula" / "mintime_line.npz")
+    ln = Line(z["pts"], "mintime")
+    speed_plan_ggv(ln, cfg["kart"], **(plan or {}))
+    return ln
+
+
+def plan_table(line, cfg, lat, brake, cache={}):
+    """GGV speed table (line points,) for these limits (cached)."""
+    from kart_gps.planner import speed_plan_ggv
+    key = (id(line), round(lat, 4), round(brake, 4))
+    if key not in cache:
+        cache[key] = speed_plan_ggv(line, cfg["kart"], lat=lat, brake=brake, store=False)
+    return cache[key]
+
+
+def c_laps(cfg, track, base, line, cands, laps, seed, mk=None, log=None):
+    """Driver C for each candidate (dict: lat, brake + formula knobs) on the SAME laps.
+    laps {level: n}. -> list (one per candidate) of row lists. mk(sim, line, cand_list, per)
+    can build another batched driver (default BatchFormula)."""
+    from kart_gpu.formula import BatchFormula
+    per = sum(laps.values())
+    K = len(cands)
+    lv = level_vector(laps, K)
+    sim, est = make_sim(cfg, track, base, per * K, seed, lv, tile=K)
+    blk = torch.arange(per * K) // per
+    tabs = np.array([plan_table(line, cfg, c["lat"], c["brake"]) for c in cands])
+    knobs = {k: torch.tensor([c[k] for c in cands], dtype=sim.f)[blk]
+             for k in ("tau", "us", "w_space", "w_time", "zeta", "preview") if k in cands[0]}
+    drv = (mk or (lambda *a, **k: BatchFormula(*a, **k)))(sim, line, tabs, blk, **knobs)
+    res = run_laps(sim, est, drv, progress=log)
+    return [rows(res, lv, slice(i * per, (i + 1) * per)) for i in range(K)]
