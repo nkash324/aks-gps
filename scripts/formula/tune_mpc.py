@@ -64,7 +64,7 @@ def main():
         return c
 
     t = time.time()
-    c1 = [c1[0]] + [sample(DEFAULT, 0.2) for _ in range(a.n1 - 1)]
+    c1 = [dict(DEFAULT)] + [sample(DEFAULT, 0.2) for _ in range(a.n1 - 1)]
     s1 = evaluate(cfg, track, base, line, c1, laps, TUNE_SEED, a.block)
     allc = [{"cand": c, "s": s["realistic"], "round": 1} for c, s in zip(c1, s1)]
     best = sorted(allc, key=lambda r: score(r["s"]))[:a.top]

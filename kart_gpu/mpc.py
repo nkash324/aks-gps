@@ -67,6 +67,7 @@ class BatchMPC:
         for key, d in KNOBS.items():
             self.k[key] = torch.as_tensor(knobs.pop(key, d), device=self.dev, dtype=self.f).expand(self.N)
         self.vpre = int(knobs.pop("vpre", 1))
+        self.delay_sub = int(knobs.pop("delay_sub", 0))     # substeps of the first step on the previous command
         assert not knobs, f"unknown knobs {list(knobs)}"
         L = kart["wheelbase"]
         self.kmax = math.tan(sim.max_delta) / L
@@ -126,9 +127,11 @@ class BatchMPC:
         kprev, vprev = st["kc_prev"], st["vt_prev"]
         s0 = s
         for i in range(H):
-            for _ in range(self.sub):
+            for j in range(self.sub):
                 kr = self._interp(self.kref, s)
-                dka = ((kc[:, i] / us - ka) / lag).clamp(-self.krate, self.krate)
+                # command delay: the first substep(s) still run on the command issued last time
+                kcur = st["kc_prev"] if (i == 0 and j < self.delay_sub) else kc[:, i]
+                dka = ((kcur / us - ka) / lag).clamp(-self.krate, self.krate)
                 a = (self.kp * (vt[:, i] - v)).clamp(min=-kn["brake"] - 0.3)
                 a = torch.minimum(a, self._accel_max(v))
                 ds = v * torch.cos(ep) / (1 - kr * e).clamp(min=0.3)

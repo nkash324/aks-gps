@@ -150,7 +150,7 @@ def c_laps(cfg, track, base, line, cands, laps, seed, mk=None, log=None):
 MPC_KEYS = ("w_e", "w_b", "margin", "w_g", "w_v", "w_prog", "w_sk", "w_sv", "us", "lag")
 
 
-def mpc_laps(cfg, track, base, line, cands, laps, seed, log=None, iters=12, lr=0.1, H=15):
+def mpc_laps(cfg, track, base, line, cands, laps, seed, log=None, iters=12, lr=0.1, H=15, delay_sub=0):
     """Driver MPC for each candidate (dict: lat, brake + MPC knobs) on the SAME laps (tile blocks)."""
     from kart_gpu.mpc import BatchMPC
     per = sum(laps.values())
@@ -161,6 +161,6 @@ def mpc_laps(cfg, track, base, line, cands, laps, seed, log=None, iters=12, lr=0
     tabs = np.array([plan_table(line, cfg, c["lat"], c["brake"]) for c in cands])
     knobs = {k: torch.tensor([c[k] for c in cands], dtype=sim.f)[blk]
              for k in MPC_KEYS + ("lat", "brake") if k in cands[0]}
-    drv = BatchMPC(sim, line, track, cfg, tabs, blk, iters=iters, lr=lr, H=H, **knobs)
+    drv = BatchMPC(sim, line, track, cfg, tabs, blk, iters=iters, lr=lr, H=H, delay_sub=delay_sub, **knobs)
     res = run_laps(sim, est, drv, progress=log)
     return [rows(res, lv, slice(i * per, (i + 1) * per)) for i in range(K)]

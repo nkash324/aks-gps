@@ -71,3 +71,20 @@ def test_formula_numpy_matches_torch(world, mt):
     speed, curv = drv(est)
     np.testing.assert_allclose(speed.numpy(), [w[0] for w in want], atol=2e-3)
     np.testing.assert_allclose(curv.numpy(), [w[1] for w in want], atol=2e-3)
+
+
+def test_mpc_smoke(world, mt):
+    """The MPC drives the first seconds of a lap on the CPU: valid commands, no end, makes progress."""
+    from kart_gpu.mpc import BatchMPC
+    from kart_gpu.sim import BatchLap
+    cfg, track = world
+    base = build_line("optimised", track, cfg)
+    sim = BatchLap(cfg, 4, device="cpu", track=track, line=base, seed=3)
+    est = sim.reset(level=torch.ones(4, dtype=torch.long))
+    drv = BatchMPC(sim, mt, track, cfg, mt.speed, iters=4)
+    for _ in range(40):
+        speed, curv = drv(est)
+        assert torch.isfinite(speed).all() and torch.isfinite(curv).all()
+        assert curv.abs().max() <= drv.kmax + 1e-6 and speed.min() >= 0
+        est, done, info = sim.step(speed, curv)
+    assert not done.any() and info["progress"].min() > 3.0
